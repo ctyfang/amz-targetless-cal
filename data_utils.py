@@ -5,11 +5,63 @@
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+import open3d as o3d
+import json
 import os
 from os.path import dirname, abspath
 import argparse
 import math as m
 
+
+def custom_draw_xyz_with_params(xyz, camera_params):
+    # Construct pcd object
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(xyz)
+
+    vis = o3d.visualization.Visualizer()
+    vis.create_window(window_name='pc', visible=True, width=camera_params.intrinsic.width, height=camera_params.intrinsic.height)
+    ctr = vis.get_view_control()
+    vis.add_geometry(pcd)
+    ctr.convert_from_pinhole_camera_parameters(camera_params)
+    vis.run()
+
+
+def custom_draw_geometry_with_key_callback(pcd):
+
+    def change_background_to_black(vis):
+        opt = vis.get_render_option()
+        opt.background_color = np.asarray([0, 0, 0])
+        return False
+
+    def load_render_option(vis):
+        vis.get_render_option().load_from_json(
+            "../../TestData/renderoption.json")
+        return False
+
+    def capture_depth(vis):
+        depth = vis.capture_depth_float_buffer()
+        plt.imshow(np.asarray(depth))
+        plt.show()
+        return False
+
+    def capture_image(vis):
+        image = vis.capture_screen_float_buffer()
+        plt.imshow(np.asarray(image))
+        plt.show()
+        return False
+
+    def save_camera_model(vis):
+        ctr = vis.get_view_control()
+        param = ctr.convert_to_pinhole_camera_parameters()
+        o3d.io.write_pinhole_camera_parameters('./configs/o3d_camera_model.json', param)
+
+    key_to_callback = {}
+    key_to_callback[ord("K")] = change_background_to_black
+    key_to_callback[ord("R")] = load_render_option
+    key_to_callback[ord(",")] = capture_depth
+    key_to_callback[ord(".")] = capture_image
+    key_to_callback[ord("C")] = save_camera_model
+    o3d.visualization.draw_geometries_with_key_callbacks([pcd], key_to_callback)
 
 def load_from_bin(bin_path):
     # load point cloud from a binary file
