@@ -19,6 +19,35 @@ import argparse
 import math as m
 
 
+def compute_centerscore(nn_xyz, center_xyz, max_nn_d):
+    # Description: Compute modified center-based score. Distance between center (center_xyz),
+    #              and the neighborhood (N x 3) around center_xyz. Result is scaled by max
+    #              distance in the neighborhood, as done in Kang 2019.
+
+    centroid = np.mean(nn_xyz, axis=0)
+    norm_dist = np.linalg.norm(center_xyz - centroid)/max_nn_d
+    return norm_dist
+
+
+def compute_planarscore(nn_xyz, center_xyz):
+
+    complete_xyz = np.concatenate([nn_xyz, center_xyz.reshape((1, 3))], axis=0)
+    centroid = np.mean(complete_xyz, axis=0)
+    centered_xyz = complete_xyz - centroid
+
+    # Build structure tensor
+    nPoints = centered_xyz.shape[0]
+    S = np.zeros((3, 3))
+    for i in range(nPoints):
+        S += np.dot(centered_xyz[i, :].T, centered_xyz[i, :])
+    S /= nPoints
+
+    # Compute planarity of neighborhood using SVD (Xia & Wang 2017)
+    _, eig_vals, _ = np.linalg.svd(S)
+    planarity = (eig_vals[1] - eig_vals[2])/eig_vals[0]
+
+    return planarity
+
 def visualize_neighborhoods(xyz):
     kdtree = ckdtree.cKDTree(xyz)
 
