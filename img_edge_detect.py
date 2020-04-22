@@ -18,6 +18,7 @@ INPUT_DIR = 'data/2011_09_26_0017'
 # calib_velo2cam_path = "data/calib_velo_to_cam.txt"
 # calib_cam2cam_path = "data/calib_cam_to_cam.txt"
 
+
 class PtCloud():
     '''
     Point Cloud Class
@@ -93,7 +94,9 @@ class PtCloud():
         if FULL:
             index = range(self.pixels.shape[1])
         else:
-            index = np.random.choice(self.pixels.shape[1], size=int(self.pixels.shape[1]/10), replace=False)
+            index = np.random.choice(self.pixels.shape[1],
+                                     size=int(self.pixels.shape[1]/10),
+                                     replace=False)
         for i in index:
             if self.points[i, 0] < 0:
                 continue
@@ -122,6 +125,7 @@ class PtCloud():
         # max distance is 120m but usually not usual
         return (((dist - min_d) / (max_d - min_d)) * 120).astype(np.uint8)
 
+
 def get_argument():
     '''
     Retrieve Required Input from User
@@ -129,8 +133,8 @@ def get_argument():
     parser = argparse.ArgumentParser(
         description='Perform weighted edge detection based on image gradients')
     parser.add_argument('input_dir',
-                        help='Top level directory containing all Sensor Data.\n\
-                                    Default KITTI Structure assumed.')
+                        help='Directory containing all Sensor Data.\n\
+                              Default KITTI Structure assumed.')
     parser.add_argument('output_dir',
                         help='Output directory for generated images')
     parser.add_argument('calib_dir',
@@ -151,7 +155,6 @@ def get_argument():
             sys.exit(1)
         print('Using default input directory')
 
-
     if not output_dir.exists():
         print('Output image directory did not exist')
         print('Directory created according to given name')
@@ -166,15 +169,11 @@ def get_argument():
 def main():
     '''
     MAIN() function.
-    If called directly, a video with point cloud projection is generated
+    If called directly, an edge image is generated
+    with randomly sampled partial point cloud projected
     '''
     input_dir, output_dir, calib_dir = get_argument()
     images = sorted(glob.glob(str(input_dir)+'/image_02/data/*.png'))
-
-    # """ save result video """
-    # fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    # vid = cv2.VideoWriter(str(output_dir) + '/original_projection.mp4',
-    #                       fourcc, 20, (1242, 375))
 
     for img in images:
         image = cv2.imread(img)
@@ -184,17 +183,14 @@ def main():
         ptcloud = PtCloud(calib_dir, input_dir, frame)
         ptcloud.to_pixel()
         img_with_proj = ptcloud.draw_points(edge, FULL=True)
-        cv2.imwrite(str(output_dir) + '/edge_with_full_projection.png', img_with_proj)
+        cv2.imwrite(str(output_dir) + '/edge_full_proj.png', img_with_proj)
         img_with_proj = ptcloud.draw_points(edge, FULL=False)
-        cv2.imwrite(str(output_dir) + '/edge_with_sub_projection.png', img_with_proj)
+        cv2.imwrite(str(output_dir) + '/edge_sub_proj.png', img_with_proj)
 
-        # vid.write(img_with_proj)
-        cv2.imshow('edge_with_projection', img_with_proj)
+        cv2.imshow('Edge with projection', img_with_proj)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
         return
-    # vid.release()
-    # cv2.destroyAllWindows()
 
 
 if __name__ == '__main__':
