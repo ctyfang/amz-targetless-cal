@@ -6,11 +6,41 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 import open3d as o3d
+from scipy.spatial import ckdtree
+
+from copy import deepcopy
+from random import randint
+from time import sleep
+import scipy
 import json
 import os
 from os.path import dirname, abspath
 import argparse
 import math as m
+
+
+def visualize_neighborhoods(xyz):
+    kdtree = ckdtree.cKDTree(xyz)
+
+    colors = np.zeros((xyz.shape[0], 3))
+    colors[:, 0] = 1
+
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(xyz)
+    pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    def highlight_neighborhood(vis):
+        point_idx = randint(0, xyz.shape[0])
+        new_colors = deepcopy(colors)
+        new_colors[point_idx] = [0, 1, 0]
+
+        neighbors_d, neighbors_i = kdtree.query(xyz[point_idx, :], 1000)
+        new_colors[neighbors_i] = [0, 1, 0]
+        pcd.colors = o3d.utility.Vector3dVector(new_colors)
+        vis.update_geometry(pcd)
+        sleep(0.5)
+
+    o3d.visualization.draw_geometries_with_animation_callback([pcd], highlight_neighborhood)
 
 
 def custom_draw_xyz_with_params(xyz, camera_params):
@@ -26,7 +56,7 @@ def custom_draw_xyz_with_params(xyz, camera_params):
     vis.run()
 
 
-def custom_draw_geometry_with_key_callback(pcd):
+def custom_draw_geometry_with_key_callbacks(pcd):
 
     def change_background_to_black(vis):
         opt = vis.get_render_option()
