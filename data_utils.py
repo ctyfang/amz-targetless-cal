@@ -1,3 +1,4 @@
+"""Utility functions for handling images and pointclouds"""
 # Deep Learning for Autonomous Driving
 # Material for the 3rd and 4th problem of Project 1
 # For further questions contact Dengxin Dai (dai@vision.ee.ethz.ch) or Ozan Unal (ouenal@ee.ethz.ch)
@@ -7,10 +8,14 @@ import cv2
 import matplotlib.pyplot as plt
 import open3d as o3d
 from scipy.spatial import ckdtree
+import matplotlib
+from matplotlib import pyplot as plt
+from matplotlib import cm as cm
 
 from copy import deepcopy
 from random import randint
 from time import sleep
+
 import scipy
 import json
 import os
@@ -18,6 +23,20 @@ from os.path import dirname, abspath
 import argparse
 import math as m
 
+
+def visualize_xyz_scores(xyz, scores):
+    norm = matplotlib.colors.Normalize(vmin=np.min(scores), vmax=np.max(scores), clip=True)
+    mapper = cm.ScalarMappable(norm=norm, cmap=cm.jet)
+    colors = np.asarray([mapper.to_rgba(x)[:3] for x in scores])
+
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(xyz)
+    pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    vis = o3d.visualization.Visualizer()
+    vis.create_window()
+    vis.add_geometry(pcd)
+    vis.run()
 
 def compute_centerscore(nn_xyz, center_xyz, max_nn_d):
     # Description: Compute modified center-based score. Distance between center (center_xyz),
@@ -36,14 +55,14 @@ def compute_planarscore(nn_xyz, center_xyz):
     centered_xyz = complete_xyz - centroid
 
     # Build structure tensor
-    nPoints = centered_xyz.shape[0]
-    S = np.zeros((3, 3))
-    for i in range(nPoints):
-        S += np.dot(centered_xyz[i, :].T, centered_xyz[i, :])
-    S /= nPoints
+    n_points = centered_xyz.shape[0]
+    s = np.zeros((3, 3))
+    for i in range(n_points):
+        s += np.dot(centered_xyz[i, :].T, centered_xyz[i, :])
+    s /= n_points
 
     # Compute planarity of neighborhood using SVD (Xia & Wang 2017)
-    _, eig_vals, _ = np.linalg.svd(S)
+    _, eig_vals, _ = np.linalg.svd(s)
     planarity = (eig_vals[1] - eig_vals[2])/eig_vals[0]
 
     return planarity
