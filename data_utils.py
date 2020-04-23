@@ -25,7 +25,8 @@ import math as m
 
 
 def visualize_xyz_scores(xyz, scores):
-    norm = matplotlib.colors.Normalize(vmin=np.min(scores), vmax=np.max(scores), clip=True)
+    norm = matplotlib.colors.Normalize(
+        vmin=np.min(scores), vmax=np.max(scores), clip=True)
     mapper = cm.ScalarMappable(norm=norm, cmap=cm.jet)
     colors = np.asarray([mapper.to_rgba(x)[:3] for x in scores])
 
@@ -37,6 +38,7 @@ def visualize_xyz_scores(xyz, scores):
     vis.create_window()
     vis.add_geometry(pcd)
     vis.run()
+
 
 def compute_centerscore(nn_xyz, center_xyz, max_nn_d):
     # Description: Compute modified center-based score. Distance between center (center_xyz),
@@ -63,9 +65,10 @@ def compute_planarscore(nn_xyz, center_xyz):
 
     # Compute planarity of neighborhood using SVD (Xia & Wang 2017)
     _, eig_vals, _ = np.linalg.svd(s)
-    planarity = (eig_vals[1] - eig_vals[2])/eig_vals[0]
+    planarity = 1 - (eig_vals[1] - eig_vals[2])/eig_vals[0]
 
     return planarity
+
 
 def visualize_neighborhoods(xyz):
     kdtree = ckdtree.cKDTree(xyz)
@@ -88,7 +91,8 @@ def visualize_neighborhoods(xyz):
         vis.update_geometry(pcd)
         sleep(0.5)
 
-    o3d.visualization.draw_geometries_with_animation_callback([pcd], highlight_neighborhood)
+    o3d.visualization.draw_geometries_with_animation_callback(
+        [pcd], highlight_neighborhood)
 
 
 def custom_draw_xyz_with_params(xyz, camera_params):
@@ -97,7 +101,8 @@ def custom_draw_xyz_with_params(xyz, camera_params):
     pcd.points = o3d.utility.Vector3dVector(xyz)
 
     vis = o3d.visualization.Visualizer()
-    vis.create_window(window_name='pc', visible=True, width=camera_params.intrinsic.width, height=camera_params.intrinsic.height)
+    vis.create_window(window_name='pc', visible=True,
+                      width=camera_params.intrinsic.width, height=camera_params.intrinsic.height)
     ctr = vis.get_view_control()
     vis.add_geometry(pcd)
     ctr.convert_from_pinhole_camera_parameters(camera_params)
@@ -131,7 +136,8 @@ def custom_draw_geometry_with_key_callbacks(pcd):
     def save_camera_model(vis):
         ctr = vis.get_view_control()
         param = ctr.convert_to_pinhole_camera_parameters()
-        o3d.io.write_pinhole_camera_parameters('./configs/o3d_camera_model.json', param)
+        o3d.io.write_pinhole_camera_parameters(
+            './configs/o3d_camera_model.json', param)
 
     key_to_callback = {}
     key_to_callback[ord("K")] = change_background_to_black
@@ -139,13 +145,22 @@ def custom_draw_geometry_with_key_callbacks(pcd):
     key_to_callback[ord(",")] = capture_depth
     key_to_callback[ord(".")] = capture_image
     key_to_callback[ord("C")] = save_camera_model
-    o3d.visualization.draw_geometries_with_key_callbacks([pcd], key_to_callback)
+    o3d.visualization.draw_geometries_with_key_callbacks(
+        [pcd], key_to_callback)
+
 
 def load_from_bin(bin_path):
     # load point cloud from a binary file
     obj = np.fromfile(bin_path, dtype=np.float32).reshape(-1, 4)
     # ignore reflectivity info
     return obj[:, :3]
+
+
+def load_from_csv(csv_path, delimiter=',', skip_header=0):
+    # load point cloud from a csv file
+    obj = np.genfromtxt(csv_path, delimiter=delimiter, skip_header=skip_header)
+    # ignore unnecessary indices in first column
+    return obj[:, 1:4]
 
 
 def depth_color(val, min_d=0, max_d=120):
@@ -162,7 +177,7 @@ def line_color(val, min_d=1, max_d=64):
     print Color(HSV's H value) corresponding to laser id
     """
     alter_num = 4
-    return (((val - min_d)%alter_num) * 127/alter_num).astype(np.uint8)
+    return (((val - min_d) % alter_num) * 127/alter_num).astype(np.uint8)
 
 
 def calib_velo2cam(filepath):
@@ -183,6 +198,7 @@ def calib_velo2cam(filepath):
                 T = T.reshape(3, 1)
     return R, T
 
+
 def calib_imu2velo(filepath):
     """
     get Rotation(R : 3x3), Translation(T : 3x1) matrix info
@@ -200,6 +216,7 @@ def calib_imu2velo(filepath):
                 T = np.fromstring(val, sep=' ')
                 T = T.reshape(3, 1)
     return R, T
+
 
 def calib_cam2cam(filepath, mode):
     """
@@ -224,17 +241,16 @@ def calib_cam2cam(filepath, mode):
     return P_
 
 
-
 def print_projection_plt(points, color, image):
     """ project converted velodyne points into camera image """
 
     hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
     for i in range(points.shape[1]):
-        cv2.circle(hsv_image, (np.int32(points[0][i]), np.int32(points[1][i])), 2, (int(color[i]), 255, 255), -1)
+        cv2.circle(hsv_image, (np.int32(points[0][i]), np.int32(
+            points[1][i])), 2, (int(color[i]), 255, 255), -1)
 
     return cv2.cvtColor(hsv_image, cv2.COLOR_HSV2RGB)
-
 
 
 def compute_timestamps(timestamps_f, ind):
@@ -246,9 +262,9 @@ def compute_timestamps(timestamps_f, ind):
         #file_id = file[7:10]
         timestamps_ = timestamps_[int(ind)]
         timestamps_ = timestamps_[11:]
-        timestamps_ = np.double(timestamps_[:2]) * 3600 + np.double(timestamps_[3:5]) * 60 + np.double(timestamps_[6:])
+        timestamps_ = np.double(timestamps_[
+                                :2]) * 3600 + np.double(timestamps_[3:5]) * 60 + np.double(timestamps_[6:])
     return timestamps_
-
 
 
 def load_oxts_velocity(oxts_f):
@@ -269,4 +285,3 @@ def load_oxts_angular_rate(oxts_f):
         angular_rate_l = data[0][21]
         angular_rate_u = data[0][22]
     return angular_rate_f, angular_rate_l, angular_rate_u
-
