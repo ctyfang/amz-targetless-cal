@@ -12,23 +12,28 @@ import open3d as o3d
 from data_utils import *
 
 
-DATA_PATH = '/media/carter/Samsung_T5/3dv/2011_09_26/2011_09_26_drive_0106_sync/' \
-            'velodyne_points/data'
+DATA_PATH_LIST = [('/media/carter/Samsung_T5/3dv/2011_09_26/2011_09_26_drive_0106_sync/'
+                   'velodyne_points/data'), ('/home/benjin/Development/Data/'
+                                             '2011_09_26_drive_0106_sync/velodyne_points/data')]
+
+DATA_PATH = getPath(DATA_PATH_LIST)
 
 O3D_VIEW_PATH = './configs/o3d_camera_model.json'
 FILE_IDX = 29
-pc_xyz = load_from_bin(os.path.join(DATA_PATH, str(FILE_IDX).zfill(10) + '.bin'))
+pc_xyz = load_from_bin(os.path.join(
+    DATA_PATH, str(FILE_IDX).zfill(10) + '.bin'))
 CAMERA_PARAMS = o3d.io.read_pinhole_camera_parameters(O3D_VIEW_PATH)
 
 # Select a subset of the points
 DATA_FRACTION = 1
-fraction_idxs = np.random.randint(0, pc_xyz.shape[0], size=round(DATA_FRACTION*pc_xyz.shape[0]))
+fraction_idxs = np.random.randint(
+    0, pc_xyz.shape[0], size=round(DATA_FRACTION*pc_xyz.shape[0]))
 pc_xyz = pc_xyz[fraction_idxs, :]
 
-## View pointcloud from approx. perspective of camera
+# View pointcloud from approx. perspective of camera
 # custom_draw_xyz_with_params(pc_xyz, camera_params)
 
-## Visualize neighborhoods around each point
+# Visualize neighborhoods around each point
 # visualize_neighborhoods(pc_xyz)
 
 # Edge Score Computation
@@ -50,7 +55,8 @@ for point_idx in range(pc_xyz.shape[0]):
     neighborhood_xyz = pc_xyz[neighbor_i, :]
 
     t = time.time()
-    center_score = compute_centerscore(neighborhood_xyz, curr_xyz, np.max(neighbor_d))
+    center_score = compute_centerscore(
+        neighborhood_xyz, curr_xyz, np.max(neighbor_d))
     planarity_score = compute_planarscore(neighborhood_xyz, curr_xyz)
     # print(f'Center score:{center_score}\n Planarity score:{planarity_score}\n')
     # print(f'Elapsed for computation:{time.time()-t}')
@@ -63,7 +69,8 @@ for point_idx in range(pc_xyz.shape[0]):
 # Combine two edge scores (Global normalization, local neighborhood size normalization)
 max_center_score = np.max(center_score_arr)
 max_planar_score = np.max(planar_score_arr)
-total_score_arr = np.divide(0.5*(center_score_arr/max_center_score + planar_score_arr/max_planar_score), nn_size_arr)
+total_score_arr = np.divide(
+    0.5*(center_score_arr/max_center_score + planar_score_arr/max_planar_score), nn_size_arr)
 print(f"Total pc scoring time:{time.time()-start_t}")
 
 # Normalize scores and map to colors

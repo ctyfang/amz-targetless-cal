@@ -19,9 +19,18 @@ from time import sleep
 import scipy
 import json
 import os
+import sys
 from os.path import dirname, abspath
 import argparse
 import math as m
+
+
+def getPath(list_of_paths):
+    for path in list_of_paths:
+        if os.path.isdir(path):
+            return path
+    print("ERROR: Data paths don't exist!")
+    sys.exit()
 
 
 def visualize_xyz_scores(xyz, scores):
