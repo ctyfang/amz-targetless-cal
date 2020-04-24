@@ -1,6 +1,7 @@
 """Utilities for detecting edges in pointclouds"""
 import os
 import time
+import json
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -11,17 +12,17 @@ import open3d as o3d
 
 from data_utils import *
 
-
-DATA_PATH = '/media/carter/Samsung_T5/3dv/2011_09_26/2011_09_26_drive_0106_sync/' \
-            'velodyne_points/data'
+with open('./configs/data_paths.json') as paths_handle:
+    data = json.load(paths_handle)
+    PC_DIR = data['PC_DIR']
 
 O3D_VIEW_PATH = './configs/o3d_camera_model.json'
 FILE_IDX = 29
-pc_xyz = load_from_bin(os.path.join(DATA_PATH, str(FILE_IDX).zfill(10) + '.bin'))
+pc_xyz = load_from_bin(os.path.join(PC_DIR, str(FILE_IDX).zfill(10) + '.bin'))
 CAMERA_PARAMS = o3d.io.read_pinhole_camera_parameters(O3D_VIEW_PATH)
 
 # Select a subset of the points
-DATA_FRACTION = 1
+DATA_FRACTION = 0.01
 fraction_idxs = np.random.randint(0, pc_xyz.shape[0], size=round(DATA_FRACTION*pc_xyz.shape[0]))
 pc_xyz = pc_xyz[fraction_idxs, :]
 
