@@ -33,9 +33,35 @@ def getPath(list_of_paths):
     sys.exit()
 
 
-def visualize_xyz_scores(xyz, scores):
+def rm_first_and_last_channel(pc_edge_points, pc_edge_scores, hor_res=0.2):
+    x = pc_edge_points[:, 0]
+    y = pc_edge_points[:, 1]
+    z = pc_edge_points[:, 2]
+    polar_angle = np.arctan2(np.sqrt(np.square(x) + np.square(y)), z)
+
+    # Find the indices of the 360 / horizontal_resolution smallest/largest polar angles
+    size_channel = 2 * int(360 / hor_res)
+    neg_mask_smallest_angle = np.argpartition(
+        polar_angle, size_channel)[:size_channel]
+    neg_mask_largest_angle = np.argpartition(
+        polar_angle, -size_channel)[-size_channel:]
+    neg_mask = np.concatenate(
+        (neg_mask_largest_angle, neg_mask_smallest_angle), axis=0)
+
+    red_pc_edge_points = np.delete(pc_edge_points, neg_mask, axis=0)
+    red_pc_edge_scores = np.delete(pc_edge_scores, neg_mask, axis=0)
+
+    return red_pc_edge_points, red_pc_edge_scores
+
+
+def visualize_xyz_scores(xyz, scores, vmin=None, vmax=None):
+    if vmin is None:
+        vmin = np.min(scores)
+    if vmax is None:
+        vmax = np.max(scores)
+
     norm = matplotlib.colors.Normalize(
-        vmin=np.min(scores), vmax=np.max(scores), clip=True)
+        vmin=vmin, vmax=vmax, clip=True)
     mapper = cm.ScalarMappable(norm=norm, cmap=cm.jet)
     colors = np.asarray([mapper.to_rgba(x)[:3] for x in scores])
 
