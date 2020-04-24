@@ -12,6 +12,10 @@ import os
 import cv2
 import numpy as np
 
+import matplotlib.pyplot as plt
+from matplotlib.colors import BoundaryNorm
+from matplotlib.ticker import MaxNLocator
+
 # Path
 # ptCloud_dir = "data/2011_09_26/sync/velodyne_points/data/"
 INPUT_DIR = 'data/2011_09_26_0017'
@@ -23,33 +27,99 @@ class PtCloud():
     '''
     Point Cloud Class
     '''
+
     def __init__(self, calib_dir, input_dir, frame):
         # data
-        self.points = np.fromfile(
-            str(input_dir)+'/velodyne_points/data/'+frame+'.bin',
-            dtype=np.float32).reshape(-1, 4)[:, :3]
+        self.points = np.fromfile(str(input_dir) + '/velodyne_points/data/' +
+                                  frame + '.bin',
+                                  dtype=np.float32).reshape(-1, 4)[:, :3]
         self.image = cv2.imread(
-            str(input_dir)+'/image_00/data/'+frame+'.png')
+            str(input_dir) + '/image_00/data/' + frame + '.png')
 
-        self.P_rect = np.zeros((3, 3))
+        self.p_rect = np.zeros((3, 3))
         self.R = np.zeros((3, 3))
         self.T = np.zeros((3, 1))
         self.load_cam(calib_dir)
         self.load_lid(calib_dir)
         self.pixels = np.ones((self.points.shape[0], 2))
-        self.to_pixel()
+        self.__to_pixel()
+        self.cost = np.zeros((self.image.shape[0], self.image.shape[1]))
+
+    def __to_pixel(self):
+        '''
+        Generate pixel coordinate for all points
+        '''
+        one_mat = np.ones((self.points.shape[0], 1))
+        point_cloud = np.concatenate((self.points, one_mat), axis=1)
+
+        # Project point into Camera Frame
+        point_cloud_cam = np.matmul(np.hstack((self.R, self.T)), point_cloud.T)
+
+        # Remove the Homogenious Term
+        point_cloud_cam = np.matmul(self.p_rect, point_cloud_cam)
+
+        # Normalize the Points into Camera Frame
+        self.pixels = point_cloud_cam[::] / point_cloud_cam[::][-1]
+        self.pixels = np.delete(self.pixels, 2, axis=0)
+
+    def __add_gaussian_cost(self, pixel, sigma, show=False):
+        '''
+        Add Gaussian-like cost to cost map
+        pixel: location of the Gaussian center
+        sigma: standard deviation of the Gaussian
+        show: Display the current cost map after adding
+        '''
+        x, y = np.meshgrid(np.linspace(-3 * sigma, 3 * sigma, 6 * sigma + 1),
+                           np.linspace(-3 * sigma, 3 * sigma, 6 * sigma + 1))
+        dist = np.sqrt(x * x + y * y)
+        gaussian = np.exp(-(dist**2 / (2.0 * sigma**2)))
+
+        # for pixel in pixels:
+        for i in range(len(x)):
+            for j in range(len(y)):
+                if ((int(pixel[0] + y[i, j]) < 0) |
+                    (int(pixel[1] + x[i, j]) < 0) |
+                    (int(pixel[0] + y[i, j]) >= self.cost.shape[1]) |
+                    (int(pixel[1] + x[i, j]) >= self.cost.shape[0])):
+                    continue
+                self.cost[int(pixel[1]+x[i, j]), int(pixel[0]+y[i, j])] += \
+                    int(255 * gaussian[i, j])
+
+        if show:
+            self.visualize_cost()
+
+    def __depth_color(self, min_d=0, max_d=120):
+        """
+        print Color(HSV's H value) corresponding to distance(m)
+        close distance = red , far distance = blue
+        """
+        dist = np.sqrt(
+            np.add(np.power(self.points[:, 0],
+                            2), np.power(self.points[:, 1], 2),
+                   np.power(self.points[:, 2], 2)))
+        np.clip(dist, 0, max_d, out=dist)
+        # max distance is 120m but usually not usual
+        return (((dist - min_d) / (max_d - min_d)) * 120).astype(np.uint8)
 
     def load_cam(self, calib_dir):
+        '''
+        Load camera parameters from file
+        KITTI format expected
+        '''
         with open(str(calib_dir) + '/calib_cam_to_cam.txt', "r") as file:
             lines = file.readlines()
 
             for line in lines:
                 (key, val) = line.split(':', 1)
                 if key == ('P_rect_' + "00"):
-                    self.P_rect = np.fromstring(val, sep=' ')\
+                    self.p_rect = np.fromstring(val, sep=' ')\
                         .reshape(3, 4)[:3, :3]
 
     def load_lid(self, calib_dir):
+        '''
+        Load LiDAR parameters from file
+        KITTI format expected
+        '''
         with open(str(calib_dir) + '/calib_velo_to_cam.txt', "r") as file:
             lines = file.readlines()
 
@@ -60,26 +130,31 @@ class PtCloud():
                 if key == 'T':
                     self.T = np.fromstring(val, sep=' ').reshape(3, 1)
 
-    def to_pixel(self):
+    def visualize_cost(self):
         '''
-        Generate pixel coordinate for all points
+        Visualize the current cost map
         '''
-        one_mat = np.ones((self.points.shape[0], 1))
-        point_cloud = np.concatenate((self.points, one_mat), axis=1)
+        np.clip(self.cost, 0, 255, out=self.cost)
+        im_x, im_y = np.meshgrid(
+            np.linspace(0, self.cost.shape[1], self.cost.shape[1] + 1),
+            np.linspace(0, self.cost.shape[0], self.cost.shape[0] + 1))
 
-        # Project point into Camera Frame
-        point_cloud_cam = np.matmul(np.hstack((self.R,
-                                               self.T)),
-                                    point_cloud.T)
+        levels = MaxNLocator(nbins=15).tick_values(0, 255)
+        cmap = plt.get_cmap('binary_r')
+        norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
 
-        # Remove the Homogenious Term
-        point_cloud_cam = np.matmul(self.P_rect, point_cloud_cam)
+        fig, ax0 = plt.subplots(nrows=1)
+        plot = ax0.pcolormesh(im_x,
+                              im_y,
+                              self.cost[::-1, :],
+                              cmap=cmap,
+                              norm=norm)
+        fig.colorbar(plot, ax=ax0)
+        ax0.set_title('pcolormesh with levels')
+        plt.axis('equal')
+        plt.show()
 
-        # Normalize the Points into Camera Frame
-        self.pixels = point_cloud_cam[::]/point_cloud_cam[::][-1]
-        self.pixels = np.delete(self.pixels, 2, axis=0)
-
-    def draw_points(self, image=None, FULL=True):
+    def draw_points(self, image=None, scale=None):
         '''
         Draw points within corresponding camera's FoV on image provided.
         If no image provided, points are drawn on an empty(black) background.
@@ -90,40 +165,31 @@ class PtCloud():
         else:
             hsv_image = np.zeros(self.image.shape).astype(np.uint8)
 
-        color = self.depth_color()
-        if FULL:
+        color = self.__depth_color()
+        if scale is None:
             index = range(self.pixels.shape[1])
         else:
             index = np.random.choice(self.pixels.shape[1],
-                                     size=int(self.pixels.shape[1]/10),
+                                     size=int(self.pixels.shape[1] / scale),
                                      replace=False)
+
         for i in index:
             if self.points[i, 0] < 0:
                 continue
-            if ((self.pixels[0, i] < 0) |
-                    (self.pixels[1, i] < 0) |
-                    (self.pixels[0, i] > hsv_image.shape[1]) |
-                    (self.pixels[1, i] > hsv_image.shape[0])):
+            if ((self.pixels[0, i] < 0) | (self.pixels[1, i] < 0) |
+                (self.pixels[0, i] > hsv_image.shape[1]) |
+                (self.pixels[1, i] > hsv_image.shape[0])):
                 continue
-            cv2.circle(hsv_image,
-                       (np.int32(self.pixels[0, i]),
-                        np.int32(self.pixels[1, i])),
-                       1, (int(color[i]), 255, 255), -1)
+            cv2.circle(
+                hsv_image,
+                (np.int32(self.pixels[0, i]), np.int32(self.pixels[1, i])), 1,
+                (int(color[i]), 255, 255), -1)
+            self.__add_gaussian_cost(
+                (np.int32(self.pixels[0, i]), np.int32(self.pixels[1, i])),
+                sigma=10,
+                show=False)
 
         return cv2.cvtColor(hsv_image, cv2.COLOR_HSV2BGR)
-
-    def depth_color(self, min_d=0, max_d=120):
-        """
-        print Color(HSV's H value) corresponding to distance(m)
-        close distance = red , far distance = blue
-        """
-        dist = np.sqrt(np.add(
-            np.power(self.points[:, 0], 2),
-            np.power(self.points[:, 1], 2),
-            np.power(self.points[:, 2], 2)))
-        np.clip(dist, 0, max_d, out=dist)
-        # max distance is 120m but usually not usual
-        return (((dist - min_d) / (max_d - min_d)) * 120).astype(np.uint8)
 
 
 def get_argument():
@@ -173,7 +239,7 @@ def main():
     with randomly sampled partial point cloud projected
     '''
     input_dir, output_dir, calib_dir = get_argument()
-    images = sorted(glob.glob(str(input_dir)+'/image_02/data/*.png'))
+    images = sorted(glob.glob(str(input_dir) + '/image_02/data/*.png'))
 
     for img in images:
         image = cv2.imread(img)
@@ -181,11 +247,12 @@ def main():
         frame = os.path.splitext(os.path.basename(img))[0]
         # load data from files - transform lidar to imu frame
         ptcloud = PtCloud(calib_dir, input_dir, frame)
-        ptcloud.to_pixel()
-        img_with_proj = ptcloud.draw_points(edge, FULL=True)
-        cv2.imwrite(str(output_dir) + '/edge_full_proj.png', img_with_proj)
-        img_with_proj = ptcloud.draw_points(edge, FULL=False)
+        # img_with_proj = ptcloud.draw_points(edge)
+        # cv2.imwrite(str(output_dir) + '/edge_full_proj.png', img_with_proj)
+
+        img_with_proj = ptcloud.draw_points(edge, scale=1000)
         cv2.imwrite(str(output_dir) + '/edge_sub_proj.png', img_with_proj)
+        ptcloud.visualize_cost()
 
         cv2.imshow('Edge with projection', img_with_proj)
         cv2.waitKey(0)
