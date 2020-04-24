@@ -1,6 +1,7 @@
 """Utilities for detecting edges in pointclouds"""
 import os
 import time
+import json
 
 import matplotlib
 import matplotlib.pyplot as plt
