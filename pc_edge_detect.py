@@ -50,19 +50,17 @@ def detect_pc_edges(pc, thr, num_nn=30, rad_nn=0.1):
 
     start_t = time.time()
     for point_idx in range(pc.shape[0]):
-
         curr_xyz = pc[point_idx, :]
 
         neighbor_d1, neighbor_i1 = kdtree.query(curr_xyz, num_nn)
         neighbor_i2 = kdtree.query_ball_point(curr_xyz, rad_nn)
         neighbor_i2 = list(set(neighbor_i2) - set(neighbor_i1))  # remove duplicates
         neighbor_d2 = np.linalg.norm(pc[neighbor_i2, :] - curr_xyz, ord=2, axis=1)
-        neighbor_i = neighbor_i1 + neighbor_i2
-        neighbor_d = neighbor_d1 + neighbor_d2
+        neighbor_i = np.append(neighbor_i1, neighbor_i2).astype(np.int)
+        neighbor_d = np.append(neighbor_d1, neighbor_d2)
 
         nn_sizes[point_idx] = neighbor_d.shape[0]
-
-        neighborhood_xyz = pc[neighbor_i, :]
+        neighborhood_xyz = pc[neighbor_i.tolist(), :]
 
         t = time.time()
         center_score = compute_centerscore(
@@ -89,7 +87,7 @@ def detect_pc_edges(pc, thr, num_nn=30, rad_nn=0.1):
     vmax = np.max(pc_edge_scores)
 
     # Remove first and last channel of rotating lidar point cloud using polar angle
-    pc, pc_edge_scores = rm_first_and_last_channel(pc, pc_edge_scores)
+    # pc, pc_edge_scores = rm_first_and_last_channel(pc, pc_edge_scores)
 
     # Remove all points with an edge score below the threshold
     filter = pc_edge_scores > thr
@@ -120,14 +118,18 @@ if __name__ == "__main__":
         DATA_PATH, str(FILE_IDX).zfill(10) + '.bin'))
 
     # Select a subset of the point cloud
-    DATA_FRACTION = 1
-    fraction_idxs = np.random.randint(
-        0, pc.shape[0], size=round(DATA_FRACTION*pc.shape[0]))
-    pc = pc[fraction_idxs, :]
+    DATA_FRACTION = 0.5
+    np.random.shuffle(pc)
+    pc = pc[:round(DATA_FRACTION*pc.shape[0]), :]
 
     # Define constants
     THRESHOLD = 0.6
     NUM_NN = 100
+    RAD_NN = 0.1
 
-    pc_edge_points, pc_edge_scores, max_pc_edge_score = detect_pc_edges(
-        pc, THRESHOLD, NUM_NN)
+    # pc_edge_points, pc_edge_scores, max_pc_edge_score = detect_pc_edges(
+    #     pc, THRESHOLD, NUM_NN)
+
+    pc_detector = PCEdgeDetector(pc, NUM_NN, RAD_NN)
+    pc_detector.detect(THRESHOLD)
+    pc_detector.visualize_edges()

@@ -1,8 +1,4 @@
 """Utility functions for handling images and pointclouds"""
-# Deep Learning for Autonomous Driving
-# Material for the 3rd and 4th problem of Project 1
-# For further questions contact Dengxin Dai (dai@vision.ee.ethz.ch) or Ozan Unal (ouenal@ee.ethz.ch)
-
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
@@ -14,7 +10,7 @@ from matplotlib import cm as cm
 
 from copy import deepcopy
 from random import randint
-from time import sleep
+import time
 
 import scipy
 import json
@@ -24,6 +20,82 @@ from os.path import dirname, abspath
 import argparse
 import math as m
 
+class PCEdgeDetector:
+
+    def __init__(self, pc, num_nn=30, rad_nn=0.1):
+        # Remove first and last channel of rotating lidar point cloud using polar angle
+        self.pc = pc
+        self.pc_tree = ckdtree.cKDTree(self.pc)
+
+        self.num_nn = num_nn
+        self.rad_nn = rad_nn
+        self.num_points = self.pc.shape[0]
+
+        self.pc_edge_scores = None
+        self.max_pc_edge_score = None
+        self.nn_sizes = None
+        self.pc_edge_idxs = None
+
+    def detect(self, thresh=0.6):
+        # Edge Score Computation
+        center_scores = np.zeros(self.num_points)
+        planar_scores = np.zeros(self.num_points)
+
+        self.pc_edge_scores = np.zeros(self.num_points)
+        self.nn_sizes = np.zeros(self.num_points)
+
+        start_t = time.time()
+        for point_idx in range(self.num_points):
+            curr_xyz = self.pc[point_idx, :]
+
+            neighbor_d1, neighbor_i1 = self.pc_tree.query(curr_xyz, self.num_nn)
+            neighbor_i2 = self.pc_tree.query_ball_point(curr_xyz, self.rad_nn)
+            neighbor_i2 = list(set(neighbor_i2) - set(neighbor_i1))  # remove duplicates
+            neighbor_d2 = np.linalg.norm(self.pc[neighbor_i2, :] - curr_xyz, ord=2, axis=1)
+            neighbor_i = np.append(neighbor_i1, neighbor_i2).astype(np.int)
+            neighbor_d = np.append(neighbor_d1, neighbor_d2)
+
+            self.nn_sizes[point_idx] = neighbor_d.shape[0]
+            neighborhood_xyz = self.pc[neighbor_i.tolist(), :]
+
+            # t = time.time()
+            center_score = compute_centerscore(
+                neighborhood_xyz, curr_xyz, np.max(neighbor_d))
+            planarity_score = compute_planarscore(neighborhood_xyz, curr_xyz)
+            # print(f'Center score:{center_score}\n Planarity score:{planarity_score}\n')
+            # print(f'Elapsed for computation:{time.time()-t}')
+
+            center_scores[point_idx] = center_score
+            planar_scores[point_idx] = planarity_score
+
+        # Combine two edge scores (Global normalization, local neighborhood size normalization)
+        max_center_score = np.max(center_scores)
+        max_planar_score = np.max(planar_scores)
+        self.pc_edge_scores = 0.5 * \
+                              (center_scores / max_center_score + planar_scores / max_planar_score)
+
+        print(f"Total pc scoring time:{time.time() - start_t}")
+
+        # Remove all points with an edge score below the threshold
+        score_mask = self.pc_edge_scores > thresh
+        self.pc_edge_idxs = np.argwhere(score_mask == True)
+        self.pc_edge_idxs = np.squeeze(self.pc_edge_idxs)
+
+        # Exclude boundary points in final thresholding and max score calculation
+        self.pc_boundary_idxs = get_first_and_last_channel_idxs(self.pc)
+        boundary_mask = [(edge_idx not in self.pc_boundary_idxs) for edge_idx in self.pc_edge_idxs]
+        self.pc_edge_idxs = self.pc_edge_idxs[boundary_mask]
+
+        pc_nonbound_edge_scores = np.delete(self.pc_edge_scores, self.pc_boundary_idxs, axis=0)
+        self.max_pc_edge_score = np.max(pc_nonbound_edge_scores)
+
+    def visualize_edges(self):
+        v_min = np.min(self.pc_edge_scores)
+        v_max = np.max(self.pc_edge_scores)
+
+        edge_points = self.pc[self.pc_edge_idxs, :]
+        edge_scores = self.pc_edge_scores[self.pc_edge_idxs]
+        visualize_xyz_scores(edge_points, edge_scores, vmin=v_min, vmax=v_max)
 
 def getPath(list_of_paths):
     for path in list_of_paths:
@@ -33,10 +105,28 @@ def getPath(list_of_paths):
     sys.exit()
 
 
-def rm_first_and_last_channel(pc_edge_points, pc_edge_scores, hor_res=0.2):
-    x = pc_edge_points[:, 0]
-    y = pc_edge_points[:, 1]
-    z = pc_edge_points[:, 2]
+def get_first_and_last_channel_idxs(pc, hor_res=0.2):
+    x = pc[:, 0]
+    y = pc[:, 1]
+    z = pc[:, 2]
+    polar_angle = np.arctan2(np.sqrt(np.square(x) + np.square(y)), z)
+
+    # Find the indices of the 360 / horizontal_resolution smallest/largest polar angles
+    size_channel = 2 * int(360 / hor_res)
+    neg_mask_smallest_angle = np.argpartition(
+        polar_angle, size_channel)[:size_channel]
+    neg_mask_largest_angle = np.argpartition(
+        polar_angle, -size_channel)[-size_channel:]
+    boundary_idxs = np.concatenate(
+        (neg_mask_largest_angle, neg_mask_smallest_angle), axis=0)
+
+    return np.unique(boundary_idxs)
+
+
+def rm_first_and_last_channel(pc, hor_res=0.2):
+    x = pc[:, 0]
+    y = pc[:, 1]
+    z = pc[:, 2]
     polar_angle = np.arctan2(np.sqrt(np.square(x) + np.square(y)), z)
 
     # Find the indices of the 360 / horizontal_resolution smallest/largest polar angles
@@ -48,10 +138,9 @@ def rm_first_and_last_channel(pc_edge_points, pc_edge_scores, hor_res=0.2):
     neg_mask = np.concatenate(
         (neg_mask_largest_angle, neg_mask_smallest_angle), axis=0)
 
-    red_pc_edge_points = np.delete(pc_edge_points, neg_mask, axis=0)
-    red_pc_edge_scores = np.delete(pc_edge_scores, neg_mask, axis=0)
+    red_pc = np.delete(pc, neg_mask, axis=0)
 
-    return red_pc_edge_points, red_pc_edge_scores
+    return red_pc
 
 
 def visualize_xyz_scores(xyz, scores, vmin=None, vmax=None):
