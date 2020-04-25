@@ -13,13 +13,15 @@ import open3d as o3d
 from data_utils import *
 
 
-def detect_pc_edges(pc, thr, num_nn):
+def detect_pc_edges(pc, thr, num_nn=30, rad_nn=0.1):
     """ Calculates edge scores of a point cloud as in Kang 2019
 
     Parameters:
     pc      -- input point cloud 
     thr     -- threshold for discarding points with a lower edge score 
-    num_nn  -- number of nearest neighbors for calculating the edge score 
+    num_nn  -- number of nearest neighbors for calculating the edge score
+    rad_nn  -- Edge scores use num_nn nearest neighbors, as well as all neighbors within a certain radius.
+               rad_nn is the radius
 
     Return:
     pc_edge_points      
@@ -50,8 +52,14 @@ def detect_pc_edges(pc, thr, num_nn):
     for point_idx in range(pc.shape[0]):
 
         curr_xyz = pc[point_idx, :]
-        # TODO: Modify neighborhood extraction
-        neighbor_d, neighbor_i = kdtree.query(curr_xyz, num_nn)
+
+        neighbor_d1, neighbor_i1 = kdtree.query(curr_xyz, num_nn)
+        neighbor_i2 = kdtree.query_ball_point(curr_xyz, rad_nn)
+        neighbor_i2 = list(set(neighbor_i2) - set(neighbor_i1))  # remove duplicates
+        neighbor_d2 = np.linalg.norm(pc[neighbor_i2, :] - curr_xyz, ord=2, axis=1)
+        neighbor_i = neighbor_i1 + neighbor_i2
+        neighbor_d = neighbor_d1 + neighbor_d2
+
         nn_sizes[point_idx] = neighbor_d.shape[0]
 
         neighborhood_xyz = pc[neighbor_i, :]
