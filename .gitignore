@@ -1,3 +1,4 @@
-# Created by .ignore support plugin (hsz.mobi)
+data/*
+generated/*
 __pycache__
-.vscode
+.vscod
