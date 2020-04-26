@@ -1,22 +1,167 @@
-# Deep Learning for Autonomous Driving
-# Material for the 3rd and 4th problem of Project 1
-# For further questions contact Dengxin Dai (dai@vision.ee.ethz.ch) or Ozan Unal (ouenal@ee.ethz.ch)
-
+"""Utility functions for handling images and pointclouds"""
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 import open3d as o3d
 from scipy.spatial import ckdtree
+import matplotlib
+from matplotlib import pyplot as plt
+from matplotlib import cm as cm
 
 from copy import deepcopy
 from random import randint
-from time import sleep
+import time
+
 import scipy
 import json
 import os
+import sys
 from os.path import dirname, abspath
 import argparse
 import math as m
+
+class PCEdgeDetector:
+
+    def __init__(self, pc, num_nn=30, rad_nn=0.1):
+        # Remove first and last channel of rotating lidar point cloud using polar angle
+        self.pc = pc
+        self.pc_tree = ckdtree.cKDTree(self.pc)
+
+        self.num_nn = num_nn
+        self.rad_nn = rad_nn
+        self.num_points = self.pc.shape[0]
+
+        self.pc_edge_scores = None
+        self.max_pc_edge_score = None
+        self.nn_sizes = None
+        self.pc_edge_idxs = None
+
+    def detect(self, thresh=0.6):
+        # Edge Score Computation
+        center_scores = np.zeros(self.num_points)
+        planar_scores = np.zeros(self.num_points)
+
+        self.pc_edge_scores = np.zeros(self.num_points)
+        self.nn_sizes = np.zeros(self.num_points)
+
+        start_t = time.time()
+        for point_idx in range(self.num_points):
+            curr_xyz = self.pc[point_idx, :]
+
+            neighbor_d1, neighbor_i1 = self.pc_tree.query(curr_xyz, self.num_nn)
+            neighbor_i2 = self.pc_tree.query_ball_point(curr_xyz, self.rad_nn)
+            neighbor_i2 = list(set(neighbor_i2) - set(neighbor_i1))  # remove duplicates
+            neighbor_d2 = np.linalg.norm(self.pc[neighbor_i2, :] - curr_xyz, ord=2, axis=1)
+            neighbor_i = np.append(neighbor_i1, neighbor_i2).astype(np.int)
+            neighbor_d = np.append(neighbor_d1, neighbor_d2)
+
+            self.nn_sizes[point_idx] = neighbor_d.shape[0]
+            neighborhood_xyz = self.pc[neighbor_i.tolist(), :]
+
+            # t = time.time()
+            center_score = compute_centerscore(
+                neighborhood_xyz, curr_xyz, np.max(neighbor_d))
+            planarity_score = compute_planarscore(neighborhood_xyz, curr_xyz)
+            # print(f'Center score:{center_score}\n Planarity score:{planarity_score}\n')
+            # print(f'Elapsed for computation:{time.time()-t}')
+
+            center_scores[point_idx] = center_score
+            planar_scores[point_idx] = planarity_score
+
+        # Combine two edge scores (Global normalization, local neighborhood size normalization)
+        max_center_score = np.max(center_scores)
+        max_planar_score = np.max(planar_scores)
+        self.pc_edge_scores = 0.5 * \
+                              (center_scores / max_center_score + planar_scores / max_planar_score)
+
+        print(f"Total pc scoring time:{time.time() - start_t}")
+
+        # Remove all points with an edge score below the threshold
+        score_mask = self.pc_edge_scores > thresh
+        self.pc_edge_idxs = np.argwhere(score_mask == True)
+        self.pc_edge_idxs = np.squeeze(self.pc_edge_idxs)
+
+        # Exclude boundary points in final thresholding and max score calculation
+        self.pc_boundary_idxs = get_first_and_last_channel_idxs(self.pc)
+        boundary_mask = [(edge_idx not in self.pc_boundary_idxs) for edge_idx in self.pc_edge_idxs]
+        self.pc_edge_idxs = self.pc_edge_idxs[boundary_mask]
+
+        pc_nonbound_edge_scores = np.delete(self.pc_edge_scores, self.pc_boundary_idxs, axis=0)
+        self.max_pc_edge_score = np.max(pc_nonbound_edge_scores)
+
+    def visualize_edges(self):
+        v_min = np.min(self.pc_edge_scores)
+        v_max = np.max(self.pc_edge_scores)
+
+        edge_points = self.pc[self.pc_edge_idxs, :]
+        edge_scores = self.pc_edge_scores[self.pc_edge_idxs]
+        visualize_xyz_scores(edge_points, edge_scores, vmin=v_min, vmax=v_max)
+
+def getPath(list_of_paths):
+    for path in list_of_paths:
+        if os.path.isdir(path):
+            return path
+    print("ERROR: Data paths don't exist!")
+    sys.exit()
+
+
+def get_first_and_last_channel_idxs(pc, hor_res=0.2):
+    x = pc[:, 0]
+    y = pc[:, 1]
+    z = pc[:, 2]
+    polar_angle = np.arctan2(np.sqrt(np.square(x) + np.square(y)), z)
+
+    # Find the indices of the 360 / horizontal_resolution smallest/largest polar angles
+    size_channel = 2 * int(360 / hor_res)
+    neg_mask_smallest_angle = np.argpartition(
+        polar_angle, size_channel)[:size_channel]
+    neg_mask_largest_angle = np.argpartition(
+        polar_angle, -size_channel)[-size_channel:]
+    boundary_idxs = np.concatenate(
+        (neg_mask_largest_angle, neg_mask_smallest_angle), axis=0)
+
+    return np.unique(boundary_idxs)
+
+
+def rm_first_and_last_channel(pc, hor_res=0.2):
+    x = pc[:, 0]
+    y = pc[:, 1]
+    z = pc[:, 2]
+    polar_angle = np.arctan2(np.sqrt(np.square(x) + np.square(y)), z)
+
+    # Find the indices of the 360 / horizontal_resolution smallest/largest polar angles
+    size_channel = 2 * int(360 / hor_res)
+    neg_mask_smallest_angle = np.argpartition(
+        polar_angle, size_channel)[:size_channel]
+    neg_mask_largest_angle = np.argpartition(
+        polar_angle, -size_channel)[-size_channel:]
+    neg_mask = np.concatenate(
+        (neg_mask_largest_angle, neg_mask_smallest_angle), axis=0)
+
+    red_pc = np.delete(pc, neg_mask, axis=0)
+
+    return red_pc
+
+
+def visualize_xyz_scores(xyz, scores, vmin=None, vmax=None):
+    if vmin is None:
+        vmin = np.min(scores)
+    if vmax is None:
+        vmax = np.max(scores)
+
+    norm = matplotlib.colors.Normalize(
+        vmin=vmin, vmax=vmax, clip=True)
+    mapper = cm.ScalarMappable(norm=norm, cmap=cm.jet)
+    colors = np.asarray([mapper.to_rgba(x)[:3] for x in scores])
+
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(xyz)
+    pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    vis = o3d.visualization.Visualizer()
+    vis.create_window()
+    vis.add_geometry(pcd)
+    vis.run()
 
 
 def compute_centerscore(nn_xyz, center_xyz, max_nn_d):
@@ -36,17 +181,18 @@ def compute_planarscore(nn_xyz, center_xyz):
     centered_xyz = complete_xyz - centroid
 
     # Build structure tensor
-    nPoints = centered_xyz.shape[0]
-    S = np.zeros((3, 3))
-    for i in range(nPoints):
-        S += np.dot(centered_xyz[i, :].T, centered_xyz[i, :])
-    S /= nPoints
+    n_points = centered_xyz.shape[0]
+    s = np.zeros((3, 3))
+    for i in range(n_points):
+        s += np.dot(centered_xyz[i, :].T, centered_xyz[i, :])
+    s /= n_points
 
     # Compute planarity of neighborhood using SVD (Xia & Wang 2017)
-    _, eig_vals, _ = np.linalg.svd(S)
-    planarity = (eig_vals[1] - eig_vals[2])/eig_vals[0]
+    _, eig_vals, _ = np.linalg.svd(s)
+    planarity = 1 - (eig_vals[1] - eig_vals[2])/eig_vals[0]
 
     return planarity
+
 
 def visualize_neighborhoods(xyz):
     kdtree = ckdtree.cKDTree(xyz)
@@ -69,7 +215,8 @@ def visualize_neighborhoods(xyz):
         vis.update_geometry(pcd)
         sleep(0.5)
 
-    o3d.visualization.draw_geometries_with_animation_callback([pcd], highlight_neighborhood)
+    o3d.visualization.draw_geometries_with_animation_callback(
+        [pcd], highlight_neighborhood)
 
 
 def custom_draw_xyz_with_params(xyz, camera_params):
@@ -78,7 +225,8 @@ def custom_draw_xyz_with_params(xyz, camera_params):
     pcd.points = o3d.utility.Vector3dVector(xyz)
 
     vis = o3d.visualization.Visualizer()
-    vis.create_window(window_name='pc', visible=True, width=camera_params.intrinsic.width, height=camera_params.intrinsic.height)
+    vis.create_window(window_name='pc', visible=True,
+                      width=camera_params.intrinsic.width, height=camera_params.intrinsic.height)
     ctr = vis.get_view_control()
     vis.add_geometry(pcd)
     ctr.convert_from_pinhole_camera_parameters(camera_params)
@@ -112,7 +260,8 @@ def custom_draw_geometry_with_key_callbacks(pcd):
     def save_camera_model(vis):
         ctr = vis.get_view_control()
         param = ctr.convert_to_pinhole_camera_parameters()
-        o3d.io.write_pinhole_camera_parameters('./configs/o3d_camera_model.json', param)
+        o3d.io.write_pinhole_camera_parameters(
+            './configs/o3d_camera_model.json', param)
 
     key_to_callback = {}
     key_to_callback[ord("K")] = change_background_to_black
@@ -120,13 +269,22 @@ def custom_draw_geometry_with_key_callbacks(pcd):
     key_to_callback[ord(",")] = capture_depth
     key_to_callback[ord(".")] = capture_image
     key_to_callback[ord("C")] = save_camera_model
-    o3d.visualization.draw_geometries_with_key_callbacks([pcd], key_to_callback)
+    o3d.visualization.draw_geometries_with_key_callbacks(
+        [pcd], key_to_callback)
+
 
 def load_from_bin(bin_path):
     # load point cloud from a binary file
     obj = np.fromfile(bin_path, dtype=np.float32).reshape(-1, 4)
     # ignore reflectivity info
     return obj[:, :3]
+
+
+def load_from_csv(csv_path, delimiter=',', skip_header=0):
+    # load point cloud from a csv file
+    obj = np.genfromtxt(csv_path, delimiter=delimiter, skip_header=skip_header)
+    # ignore unnecessary indices in first column
+    return obj[:, 1:4]
 
 
 def depth_color(val, min_d=0, max_d=120):
@@ -143,7 +301,7 @@ def line_color(val, min_d=1, max_d=64):
     print Color(HSV's H value) corresponding to laser id
     """
     alter_num = 4
-    return (((val - min_d)%alter_num) * 127/alter_num).astype(np.uint8)
+    return (((val - min_d) % alter_num) * 127/alter_num).astype(np.uint8)
 
 
 def calib_velo2cam(filepath):
@@ -164,6 +322,7 @@ def calib_velo2cam(filepath):
                 T = T.reshape(3, 1)
     return R, T
 
+
 def calib_imu2velo(filepath):
     """
     get Rotation(R : 3x3), Translation(T : 3x1) matrix info
@@ -181,6 +340,7 @@ def calib_imu2velo(filepath):
                 T = np.fromstring(val, sep=' ')
                 T = T.reshape(3, 1)
     return R, T
+
 
 def calib_cam2cam(filepath, mode):
     """
@@ -205,17 +365,16 @@ def calib_cam2cam(filepath, mode):
     return P_
 
 
-
 def print_projection_plt(points, color, image):
     """ project converted velodyne points into camera image """
 
     hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
     for i in range(points.shape[1]):
-        cv2.circle(hsv_image, (np.int32(points[0][i]), np.int32(points[1][i])), 2, (int(color[i]), 255, 255), -1)
+        cv2.circle(hsv_image, (np.int32(points[0][i]), np.int32(
+            points[1][i])), 2, (int(color[i]), 255, 255), -1)
 
     return cv2.cvtColor(hsv_image, cv2.COLOR_HSV2RGB)
-
 
 
 def compute_timestamps(timestamps_f, ind):
@@ -227,9 +386,9 @@ def compute_timestamps(timestamps_f, ind):
         #file_id = file[7:10]
         timestamps_ = timestamps_[int(ind)]
         timestamps_ = timestamps_[11:]
-        timestamps_ = np.double(timestamps_[:2]) * 3600 + np.double(timestamps_[3:5]) * 60 + np.double(timestamps_[6:])
+        timestamps_ = np.double(timestamps_[
+                                :2]) * 3600 + np.double(timestamps_[3:5]) * 60 + np.double(timestamps_[6:])
     return timestamps_
-
 
 
 def load_oxts_velocity(oxts_f):
@@ -250,4 +409,3 @@ def load_oxts_angular_rate(oxts_f):
         angular_rate_l = data[0][21]
         angular_rate_u = data[0][22]
     return angular_rate_f, angular_rate_l, angular_rate_u
-
