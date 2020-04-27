@@ -1,3 +1,4 @@
 data/*
 generated/*
-.*
+__pycache__
+.vscod
