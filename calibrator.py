@@ -120,34 +120,37 @@ class Calibrator:
             self.img_edge_scores/np.amax(self.img_edge_scores)
 
         if visualize:
-            im_x, im_y = np.meshgrid(
-                np.linspace(0, self.img_edge_scores.shape[1],
-                            self.img_edge_scores.shape[1] + 1),
-                np.linspace(0, self.img_edge_scores.shape[0],
-                            self.img_edge_scores.shape[0] + 1))
+            self.visualize_img_edges()
 
-            levels = MaxNLocator(nbins=15).tick_values(0, 1)
-            cmap = plt.get_cmap('hot')
-            norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
+    def visualize_img_edges(self):
+        im_x, im_y = np.meshgrid(
+            np.linspace(0, self.img_edge_scores.shape[1],
+                        self.img_edge_scores.shape[1] + 1),
+            np.linspace(0, self.img_edge_scores.shape[0],
+                        self.img_edge_scores.shape[0] + 1))
 
-            fig, (ax0, ax1) = plt.subplots(nrows=2)
-            plot = ax0.pcolormesh(im_x,
-                                  im_y,
-                                  self.img_edge_scores[::-1, :],
-                                  cmap=cmap,
-                                  norm=norm)
-            fig.colorbar(plot, ax=ax0)
-            ax0.set_title('edge scores')
+        levels = MaxNLocator(nbins=15).tick_values(0, 1)
+        cmap = plt.get_cmap('hot')
+        norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
 
-            binary_edge = ax1.pcolormesh(im_x,
-                                         im_y,
-                                         self.img_edges[::-1, :],
-                                         cmap=cmap,
-                                         norm=norm)
-            fig.colorbar(binary_edge, ax=ax1)
-            ax1.set_title('Binary Edge')
-            plt.axis('equal')
-            plt.show()
+        fig, (ax0, ax1) = plt.subplots(nrows=2)
+        plot = ax0.pcolormesh(im_x,
+                              im_y,
+                              self.img_edge_scores[::-1, :],
+                              cmap=cmap,
+                              norm=norm)
+        fig.colorbar(plot, ax=ax0)
+        ax0.set_title('edge scores')
+
+        binary_edge = ax1.pcolormesh(im_x,
+                                     im_y,
+                                     self.img_edges[::-1, :],
+                                     cmap=cmap,
+                                     norm=norm)
+        fig.colorbar(binary_edge, ax=ax1)
+        ax1.set_title('Binary Edge')
+        plt.axis('equal')
+        plt.show()
 
     def pc_to_pixels(self):
         '''
