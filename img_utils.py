@@ -15,6 +15,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import BoundaryNorm
 from matplotlib.ticker import MaxNLocator
+from scipy.ndimage.filters import gaussian_filter,convolve
 
 # Path
 # ptCloud_dir = "data/2011_09_26/sync/velodyne_points/data/"
@@ -100,6 +101,46 @@ class PtCloud():
         np.clip(dist, 0, max_d, out=dist)
         # max distance is 120m but usually not usual
         return (((dist - min_d) / (max_d - min_d)) * 120).astype(np.uint8)
+
+    def img_detect(self, visualize=False):
+        gray = cv2.cvtColor(self.image, cv2.COLOR_BGR2GRAY)
+        blurred = gaussian_filter(gray, sigma=2, order=0, mode='reflect')
+
+        ###### Gradients x and y (Sobel filters) ######
+        im_x = convolve(blurred, [[-1,0,1],[-2,0,2],[-1,0,1]]) 
+        im_y = convolve(blurred, [[1,2,1],[0,0,0],[-1,-2,-1]])
+
+        ###### gradient and direction ########
+        gradient = np.sqrt(np.power(im_x, 2.0) + np.power(im_y, 2.0))
+        edge = cv2.Canny(self.image, 100, 200, L2gradient=True)
+        gradient[np.where(edge == 0)] = 0
+        if visualize:
+            im_x, im_y = np.meshgrid(
+                np.linspace(0, gradient.shape[1], gradient.shape[1] + 1),
+                np.linspace(0, gradient.shape[0], gradient.shape[0] + 1))
+
+            levels = MaxNLocator(nbins=15).tick_values(0, np.amax(gradient))
+            cmap = plt.get_cmap('hot')
+            norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
+
+            fig, (ax0, ax1) = plt.subplots(nrows=2)
+            plot = ax0.pcolormesh(im_x,
+                                  im_y,
+                                  gradient[::-1, :],
+                                  cmap=cmap,
+                                  norm=norm)
+            fig.colorbar(plot, ax=ax0)
+            ax0.set_title('pcolormesh with levels')
+            edge_img = ax1.pcolormesh(im_x,
+                                      im_y,
+                                      edge[::-1, :],
+                                      cmap=cmap,
+                                      norm=norm)
+            fig.colorbar(edge_img, ax=ax1)
+            ax1.set_title('Binary Edge')
+            plt.axis('equal')
+            plt.show()
+            plt.pause(5)
 
     def load_cam(self, calib_dir):
         '''
@@ -247,12 +288,13 @@ def main():
         frame = os.path.splitext(os.path.basename(img))[0]
         # load data from files - transform lidar to imu frame
         ptcloud = PtCloud(calib_dir, input_dir, frame)
+        ptcloud.img_detect(visualize=True)
         # img_with_proj = ptcloud.draw_points(edge)
         # cv2.imwrite(str(output_dir) + '/edge_full_proj.png', img_with_proj)
 
         img_with_proj = ptcloud.draw_points(edge, scale=1000)
         cv2.imwrite(str(output_dir) + '/edge_sub_proj.png', img_with_proj)
-        ptcloud.visualize_cost()
+        # ptcloud.visualize_cost()
 
         cv2.imshow('Edge with projection', img_with_proj)
         cv2.waitKey(0)

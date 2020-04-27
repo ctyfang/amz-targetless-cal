@@ -16,18 +16,16 @@ from scipy.ndimage.filters import gaussian_filter, convolve
 class Calibrator:
 
     def __init__(self, calib_dir, input_dir, frame):
-        self.pc = np.fromfile(str(input_dir)
-                              + '/velodyne_points/data/'
-                              + str(frame).zfill(10) + '.bin',
+        self.pc = np.fromfile(str(input_dir) + '/velodyne_points/data/' +
+                              str(frame).zfill(10) + '.bin',
                               dtype=np.float32).reshape(-1, 4)[:, :3]
         self.pc_edge_scores = None
         self.pc_edge_idxs = None
         self.pc_nn_sizes = None
         self.max_pc_edge_score = None
 
-        self.img = cv.imread(str(input_dir)
-                             + '/image_00/data/'
-                             + str(frame).zfill(10) + '.png')
+        self.img = cv.imread(
+            str(input_dir) + '/image_00/data/' + str(frame).zfill(10) + '.png')
         self.img_edge_scores = None
         self.img_edges = None
         self.pixels = None
@@ -58,15 +56,15 @@ class Calibrator:
             # remove duplicates
             neighbor_i2 = list(set(neighbor_i2) - set(neighbor_i1))
             neighbor_d2 = np.linalg.norm(self.pc[neighbor_i2, :] - curr_xyz,
-                                         ord=2, axis=1)
+                                         ord=2,
+                                         axis=1)
             neighbor_i = np.append(neighbor_i1, neighbor_i2).astype(np.int)
             neighbor_d = np.append(neighbor_d1, neighbor_d2)
 
             self.pc_nn_sizes[point_idx] = neighbor_d.shape[0]
             neighborhood_xyz = self.pc[neighbor_i.tolist(), :]
 
-            center_score = compute_centerscore(neighborhood_xyz,
-                                               curr_xyz,
+            center_score = compute_centerscore(neighborhood_xyz, curr_xyz,
                                                np.max(neighbor_d))
             planarity_score = compute_planarscore(neighborhood_xyz, curr_xyz)
 
@@ -91,12 +89,14 @@ class Calibrator:
         # Exclude boundary points in final thresholding
         # and max score calculation
         pc_boundary_idxs = get_first_and_last_channel_idxs(self.pc)
-        boundary_mask = [(edge_idx not in pc_boundary_idxs)
-                         for edge_idx in self.pc_edge_idxs]
+        boundary_mask = [
+            (edge_idx not in pc_boundary_idxs) for edge_idx in self.pc_edge_idxs
+        ]
         self.pc_edge_idxs = self.pc_edge_idxs[boundary_mask]
 
         pc_nonbound_edge_scores = np.delete(self.pc_edge_scores,
-                                            pc_boundary_idxs, axis=0)
+                                            pc_boundary_idxs,
+                                            axis=0)
         self.max_pc_edge_score = np.max(pc_nonbound_edge_scores)
 
         if visualize:
@@ -156,14 +156,11 @@ class Calibrator:
         one_mat = np.ones((self.points.shape[0], 1))
         point_cloud = np.concatenate((self.points, one_mat), axis=1)
 
-        '''
-        TODO: Perform transform without homogeneous term,
-              if too memory intensive
-        '''
+        # TODO: Perform transform without homogeneous term,
+        #       if too memory intensive
+
         # Project point into Camera Frame
-        point_cloud_cam = np.matmul(np.hstack((self.R,
-                                               self.T)),
-                                    point_cloud.T)
+        point_cloud_cam = np.matmul(np.hstack((self.R, self.T)), point_cloud.T)
 
         # Remove the Homogeneous Term
         point_cloud_cam = np.matmul(self.P_rect, point_cloud_cam)
@@ -194,15 +191,14 @@ class Calibrator:
         for i in index:
             if self.points[i, 0] < 0:
                 continue
-            if ((self.pixels[0, i] < 0) |
-                    (self.pixels[1, i] < 0) |
-                    (self.pixels[0, i] > hsv_image.shape[1]) |
-                    (self.pixels[1, i] > hsv_image.shape[0])):
+            if ((self.pixels[0, i] < 0) | (self.pixels[1, i] < 0) |
+                (self.pixels[0, i] > hsv_image.shape[1]) |
+                (self.pixels[1, i] > hsv_image.shape[0])):
                 continue
-            cv.circle(hsv_image,
-                      (np.int32(self.pixels[0, i]),
-                       np.int32(self.pixels[1, i])),
-                      1, (int(color[i]), 255, 255), -1)
+            cv.circle(
+                hsv_image,
+                (np.int32(self.pixels[0, i]), np.int32(self.pixels[1, i])), 1,
+                (int(color[i]), 255, 255), -1)
 
         return cv.cvtColor(hsv_image, cv.COLOR_HSV2BGR)
 
@@ -211,10 +207,10 @@ class Calibrator:
         print Color(HSV's H value) corresponding to distance(m)
         close distance = red , far distance = blue
         """
-        dist = np.sqrt(np.add(
-            np.power(self.points[:, 0], 2),
-            np.power(self.points[:, 1], 2),
-            np.power(self.points[:, 2], 2)))
+        dist = np.sqrt(
+            np.add(np.power(self.points[:, 0],
+                            2), np.power(self.points[:, 1], 2),
+                   np.power(self.points[:, 2], 2)))
         np.clip(dist, 0, max_d, out=dist)
         # max distance is 120m but usually not usual
         return (((dist - min_d) / (max_d - min_d)) * 120).astype(np.uint8)
