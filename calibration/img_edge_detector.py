@@ -8,12 +8,12 @@ from scipy.ndimage.filters import gaussian_filter, convolve
 
 class ImgEdgeDetector:
 
-    def __init__(self, cfg):
+    def __init__(self, cfg, visualize=False):
         self.imgs = self.load_imgs(cfg.img_dir, cfg.frames)
         self.imgs_edge_scores = None
         self.imgs_edges = None
 
-        self.img_detect(visualize=True)
+        self.img_detect(visualize=visualize)
 
     def img_detect(self, visualize=False):
         '''
