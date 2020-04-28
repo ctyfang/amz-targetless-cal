@@ -12,7 +12,7 @@ import time
 from time import sleep
 
 
-def visualize_edges(xyz, edge_idxs, edge_scores):
+def pc_visualize_edges(xyz, edge_idxs, edge_scores):
     v_min = np.min(edge_scores)
     v_max = np.max(edge_scores)
 
