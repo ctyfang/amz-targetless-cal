@@ -11,7 +11,7 @@ import numpy as np
 import open3d as o3d
 
 from data_utils import *
-
+from pc_utils import *
 
 def detect_pc_edges(pc, thr, num_nn=30, rad_nn=0.1):
     """ Calculates edge scores of a point cloud as in Kang 2019
@@ -30,7 +30,7 @@ def detect_pc_edges(pc, thr, num_nn=30, rad_nn=0.1):
 
     """
 
-    O3D_VIEW_PATH = './configs/o3d_camera_model.json'
+    O3D_VIEW_PATH = '../configs/o3d_camera_model.json'
 
     CAMERA_PARAMS = o3d.io.read_pinhole_camera_parameters(O3D_VIEW_PATH)
 
@@ -107,6 +107,9 @@ def detect_pc_edges(pc, thr, num_nn=30, rad_nn=0.1):
 
 if __name__ == "__main__":
 
+    test = np.diag((5,5))
+    test2 = test[::]
+
     # Read point cloud from file
     DATA_PATH_LIST = [('/media/carter/Samsung_T5/3dv/2011_09_26/2011_09_26_drive_0106_sync/'
                        'velodyne_points/data'), ('/home/benjin/Development/Data/'
@@ -118,7 +121,7 @@ if __name__ == "__main__":
         DATA_PATH, str(FILE_IDX).zfill(10) + '.bin'))
 
     # Select a subset of the point cloud
-    DATA_FRACTION = 0.5
+    DATA_FRACTION = 1
     np.random.shuffle(pc)
     pc = pc[:round(DATA_FRACTION*pc.shape[0]), :]
 

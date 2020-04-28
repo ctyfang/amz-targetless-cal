@@ -1,5 +1,5 @@
-__pycache__
-.vscode
 data/*
 generated/*
+__pycache__
+.vscode
 .*
