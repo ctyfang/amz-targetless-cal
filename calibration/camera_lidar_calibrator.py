@@ -16,9 +16,9 @@ from calibration.img_edge_detector import ImgEdgeDetector
 
 class CameraLidarCalibrator:
 
-    def __init__(self, cfg):
-        self.pc_detecter = PcEdgeDetector(cfg)
-        self.img_detector = ImgEdgeDetector(cfg)
+    def __init__(self, cfg, visualize=False):
+        self.pc_detecter = PcEdgeDetector(cfg, visualize=visualize)
+        self.img_detector = ImgEdgeDetector(cfg, visualize=visualize)
 
         self.pixels = None
         self.K = cfg.K
