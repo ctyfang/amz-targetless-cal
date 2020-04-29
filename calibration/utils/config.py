@@ -14,6 +14,10 @@ def command_line_parser():
         help='Path to directory containing the point cloud files')
 
     parser.add_argument(
+        '--pc_subsample', type=float, default=1.0,
+        help='Subsampling fraction for the pointcloud to reduce computation while debugging')
+
+    parser.add_argument(
         '--pc_ed_rad_nn', type=float, default=0.1,
         help='Radius in which to include neighbors during point cloud edge detection')
 
@@ -44,8 +48,8 @@ def command_line_parser():
         help='Initial guess of the transformation')
 
     parser.add_argument(
-        '--K', type=json.loads, default='[7.215377e+02, 0.000000e+00, 6.095593e+02, \
-        0.000000e+00, 7.215377e+02, 1.728540e+02, 0.000000e+00, 0.000000e+00, 1.000000e+00]',
+        '--K', type=json.loads, default='[[7.215377e+02, 0.000000e+00, 6.095593e+02], \
+        [0.000000e+00, 7.215377e+02, 1.728540e+02], [0.000000e+00, 0.000000e+00, 1.000000e+00]]',
         help='3x3 camera matrix')
 
     parser.add_argument(
