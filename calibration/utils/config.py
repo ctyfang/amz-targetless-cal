@@ -54,6 +54,4 @@ def command_line_parser():
 
     cfg = parser.parse_args()
 
-    print(json.dumps(cfg.__dict__, indent=4, sort_keys=True))
-
     return cfg

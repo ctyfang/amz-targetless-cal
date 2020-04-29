@@ -1,6 +1,7 @@
 """Top-level class for Calibration"""
 import numpy as np
 import cv2 as cv
+import gc
 
 from calibration.utils.data_utils import *
 from calibration.utils.pc_utils import *
@@ -17,7 +18,8 @@ from calibration.img_edge_detector import ImgEdgeDetector
 class CameraLidarCalibrator:
 
     def __init__(self, cfg, visualize=False):
-        self.pc_detecter = PcEdgeDetector(cfg, visualize=visualize)
+        self.pc_detecter = PcEdgeDetector(cfg, visualize=False)
+        gc.collect()
         self.img_detector = ImgEdgeDetector(cfg, visualize=visualize)
 
         self.pixels = None

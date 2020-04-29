@@ -40,7 +40,8 @@ def pairwise_gradient(tau, kernel, camera_matrix, edge_point):
     return
 
 
-def cost(tau, sigma_in, camera_matrix, pc_edge_points, pc_edge_scores, pc_nn_sizes, edge_image, im_edge_scores):
+def cost(tau, sigma_in, camera_matrix, pc_edge_points, pc_edge_scores,
+         pc_nn_sizes, edge_image, im_edge_scores):
 
     # Transform pc_edge_points to camera frame
     rot_vec = tau[:2]
@@ -57,26 +58,33 @@ def cost(tau, sigma_in, camera_matrix, pc_edge_points, pc_edge_scores, pc_nn_siz
         proj_edge_point /= proj_edge_point[2]
 
         # Get gaussian kernel
-        curr_sigma = sigma_in/np.linalg.norm(curr_point, 2)
+        curr_sigma = sigma_in / np.linalg.norm(curr_point, 2)
         mu_x, mu_y = proj_edge_point[:2]
-        gauss_kernel = cv.getGaussianKernel((6*int(curr_sigma), 6*int(curr_sigma)), curr_sigma, cv.CV_64F)
+        gauss_kernel = cv.getGaussianKernel(
+            (6 * int(curr_sigma), 6 * int(curr_sigma)), curr_sigma, cv.CV_64F)
 
         # Get image patch inside the kernel
-        edge_image_patch = edge_image[mu_y - 3*int(curr_sigma): mu_y + 3*int(curr_sigma),
-                                      mu_x - 3*int(curr_sigma): mu_x + 3*int(curr_sigma)]
+        edge_image_patch = edge_image[mu_y - 3 * int(curr_sigma):mu_y +
+                                      3 * int(curr_sigma),
+                                      mu_x - 3 * int(curr_sigma):mu_x +
+                                      3 * int(curr_sigma)]
 
-        edge_scores_patch = im_edge_scores[mu_y - 3*int(curr_sigma): mu_y + 3*int(curr_sigma),
-                                           mu_x - 3*int(curr_sigma): mu_x + 3*int(curr_sigma)]
+        edge_scores_patch = im_edge_scores[mu_y - 3 * int(curr_sigma):mu_y +
+                                           3 * int(curr_sigma),
+                                           mu_x - 3 * int(curr_sigma):mu_x +
+                                           3 * int(curr_sigma)]
 
         # TODO: Handle edge cases (outside bounds, even kernel size)
         # TODO: Ensure edge_image_patch size matches kernel size
         # Weight image patch by edge scores
-        weighted_edge_image_patch = np.multiply(edge_image_patch, edge_scores_patch)
+        weighted_edge_image_patch = np.multiply(edge_image_patch,
+                                                edge_scores_patch)
         weighted_edge_image_patch /= np.max(im_edge_scores)
 
-        weighted_edge_image_patch += (pc_edge_scores[idx]/np.max(pc_edge_scores))
+        weighted_edge_image_patch += (pc_edge_scores[idx] /
+                                      np.max(pc_edge_scores))
 
-        weighted_edge_image_patch /= (2*pc_nn_sizes[idx])
+        weighted_edge_image_patch /= (2 * pc_nn_sizes[idx])
         weighted_edge_image_patch *= (-1)
 
         curr_point_cost = correlate(weighted_edge_image_patch, gauss_kernel)
