@@ -29,8 +29,9 @@ class ImgEdgeDetector:
         gradient_y = convolve(blurred, [[1, 2, 1], [0, 0, 0], [-1, -2, -1]])
         self.imgs_edge_scores = np.sqrt(
             np.power(gradient_x, 2) + np.power(gradient_y, 2))
-        self.imgs_edges = cv.Canny(self.imgs, 100, 200, L2gradient=True).astype(np.bool)
-        self.imgs_edge_scores[np.where(self.imgs_edges == 0)] = 0
+        self.imgs_edges = cv.Canny(self.imgs, 100, 200,
+                                   L2gradient=True).astype(bool)
+        self.imgs_edge_scores[~self.imgs_edges] = 0
         self.imgs_edge_scores = \
             self.imgs_edge_scores/np.amax(self.imgs_edge_scores)
 
@@ -72,11 +73,14 @@ class ImgEdgeDetector:
         # TODO: Should always return an array of images, but rest of the code
         # needs to be changed for that
         if len(frames) <= 1:
-            return cv.imread(str(path) + '/image_00/data/' +
-                             str(frames[0]).zfill(10) + '.png')
+            return cv.imread(
+                str(path) + '/image_00/data/' + str(frames[0]).zfill(10) +
+                '.png')
         else:
             imgs = []
             for frame in frames:
-                imgs.append(cv.imread(str(path) + '/image_00/data/' +
-                                      str(frame).zfill(10) + '.png'))
+                imgs.append(
+                    cv.imread(
+                        str(path) + '/image_00/data/' + str(frame).zfill(10) +
+                        '.png'))
             return imgs
