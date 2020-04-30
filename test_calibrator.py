@@ -18,6 +18,9 @@ cfg.pc_dir = input_dir
 cfg.img_dir = input_dir
 cfg.calib_dir = calib_dir
 
-calibrator = CameraLidarCalibrator(cfg, visualize=True)
+calibrator = CameraLidarCalibrator(cfg, visualize=False)
+print(calibrator.cost(120))
+print(calibrator.compute_cost(120))
+
 
 print('hi')

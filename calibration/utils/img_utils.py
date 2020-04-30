@@ -8,6 +8,7 @@ import argparse
 import glob
 import sys
 import os
+import gc
 
 import cv2
 import numpy as np
@@ -233,18 +234,10 @@ class PtCloud():
         return cv2.cvtColor(hsv_image, cv2.COLOR_HSV2BGR)
 
 def get_boundry(image, center, sigma):
-    top = 3 * sigma if center[0] > 3 * sigma else center[0]
-    left = 3 * sigma if center[1] > 3 * sigma else center[1]
-    if center[1] + 3 * sigma + 1 < image.shape[1]:
-        right = 3 * sigma + 1 
-    else:
-        right = image.shape[1] - center[1]
-
-    if center[0] + 3 * sigma + 1 < image.shape[0]:
-        bot = 3 * sigma + 1 
-    else:
-        bot = image.shape[0] - center[0]
-
+    top = min(3 * sigma, center[0])
+    bot = min(3*sigma+1, image.shape[0] - center[0] - 1)
+    left = min(3 * sigma, center[1])
+    right = min(3*sigma+1, image.shape[1] - center[1] - 1)
     return top, bot, left, right
 
 
@@ -265,6 +258,37 @@ def plot_2d(values):
     ax0.set_title('pcolormesh with levels')
     plt.axis('equal')
     plt.show()
+
+
+def getGaussianKernel2D(sigma, visualize=False):
+    x, y = np.meshgrid(np.linspace(-3 * sigma, 3 * sigma, 6 * sigma + 1),
+                        np.linspace(-3 * sigma, 3 * sigma, 6 * sigma + 1))
+    dist = np.sqrt(x * x + y * y)
+    gaussian = np.exp(-(dist**2 / (2.0 * sigma**2))) / (sigma*2 * np.pi)
+    gaussian[dist > 3*sigma] = 0
+    gaussian = gaussian / np.sum(gaussian)
+    if visualize:
+        levels = MaxNLocator(nbins=15).tick_values(0, np.amax(gaussian))
+        cmap = plt.get_cmap('hot')
+        norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
+
+        fig, ax0 = plt.subplots(nrows=1)
+        plot = ax0.pcolormesh(x,
+                            y,
+                            gaussian[::-1, :],
+                            cmap=cmap,
+                            norm=norm)
+        fig.colorbar(plot, ax=ax0)
+        ax0.set_title('pcolormesh with levels')
+        plt.axis('equal')
+        plt.show()
+    return gaussian
+
+
+def outside_image(image, pixel):
+    return (pixel[0] < 0 or pixel[0] >= image.shape[0] or
+            pixel[1] < 0 or pixel[1] >= image.shape[1])
+
 
 def get_argument():
     '''
