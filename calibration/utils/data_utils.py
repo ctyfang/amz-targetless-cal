@@ -16,7 +16,7 @@ def load_cam_cal(calib_dir):
                 P_rect = np.fromstring(val, sep=' ') \
                                   .reshape(3, 4)[:3, :3]
 
-    return P_rect
+                return P_rect
 
 
 def load_lid_cal(calib_dir):
@@ -139,3 +139,31 @@ def compute_timestamps(timestamps_f, ind):
         timestamps_ = np.double(timestamps_[
                                 :2]) * 3600 + np.double(timestamps_[3:5]) * 60 + np.double(timestamps_[6:])
     return timestamps_
+
+
+def skew(vector):
+    """
+    this function returns a numpy array with the skew symmetric cross product matrix for vector.
+    the skew symmetric cross product matrix is defined such that
+    np.cross(a, b) = np.dot(skew(a), b)
+
+    :param vector: An array like vector to create the skew symmetric cross product matrix for
+    :return: A numpy array of the skew symmetric cross product vector
+    """
+
+    return np.array([[0, -vector[2], vector[1]],
+                     [vector[2], 0, -vector[0]],
+                     [-vector[1], vector[0], 0]])
+
+
+def jacobian(omega):
+    """Given rotation vector compute Jacobian (3x3). ith column represents derivative of camera frame
+       position wrt rotation vector"""
+
+    a = (omega/np.linalg.norm(omega, 2)).reshape((3, 1))
+    omega_mag = np.linalg.norm(omega, 2)
+
+    jac = (np.sin(omega_mag)/omega_mag)*np.eye(3) + (1-np.sin(omega_mag)/omega_mag)*np.dot(a, a.T) + \
+          ((1-np.cos(omega_mag))/omega)*skew(a)
+
+    return jac
