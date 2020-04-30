@@ -232,6 +232,22 @@ class PtCloud():
 
         return cv2.cvtColor(hsv_image, cv2.COLOR_HSV2BGR)
 
+def get_boundry(image, center, sigma):
+    top = 3 * sigma if center[0] > 3 * sigma else center[0]
+    left = 3 * sigma if center[1] > 3 * sigma else center[1]
+    if center[1] + 3 * sigma + 1 < image.shape[1]:
+        right = 3 * sigma + 1 
+    else:
+        right = image.shape[1] - center[1]
+
+    if center[0] + 3 * sigma + 1 < image.shape[0]:
+        bot = 3 * sigma + 1 
+    else:
+        bot = image.shape[0] - center[0]
+
+    return top, bot, left, right
+
+
 def plot_2d(values):
     y = range(values.shape[0]+1)
     x = range(values.shape[1]+1)
