@@ -66,12 +66,10 @@ class PcEdgeDetector:
 
         # Combine two edge scores
         # (Global normalization, local neighborhood size normalization)
-        max_center_score = np.max(center_scores)
-        max_planar_score = np.max(planar_scores)
-        self.pcs_edge_scores = 0.5 * \
-            (center_scores / max_center_score
-             + planar_scores / max_planar_score)
-
+        self.pcs_edge_scores = np.multiply(center_scores, planar_scores)
+        self.pcs_edge_scores /= np.max(self.pcs_edge_scores)
+        print(np.mean(self.pcs_edge_scores))
+        print(np.std(self.pcs_edge_scores))
         print(f"Total pc scoring time:{time.time() - start_t}")
 
         # Remove all points with an edge score below the threshold

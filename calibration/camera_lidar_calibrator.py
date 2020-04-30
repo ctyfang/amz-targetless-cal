@@ -24,6 +24,7 @@ class CameraLidarCalibrator:
         self.img_detector = ImgEdgeDetector(cfg, visualize=visualize)
         gc.collect()
         self.pixels = None
+        self.pixels_mask = None
         self.K = cfg.K
         self.R, self.T = load_lid_cal(cfg.calib_dir)
         self.tau = cfg.tau_init
@@ -66,7 +67,7 @@ class CameraLidarCalibrator:
                                        (self.pixels[:, 1] <= self.img_detector.img_h))
         inside_mask = np.logical_and(inside_mask_x, inside_mask_y)
 
-        self.pixels = self.pixels[inside_mask, :]
+        self.pixels_mask = inside_mask
 
     def draw_points(self, image=None, FULL=True):
         """
@@ -117,7 +118,19 @@ class CameraLidarCalibrator:
     def compute_cost(self, sigma_in):
         """Compute cost for the current tau"""
         self.pc_to_pixels()
-        print('hi')
-        # for pc_idx in range(self.pc_detector.pcs_edge_idxs.shape[0]):
-        #     point = self.pc_detector[pc_idx, :]
-        #     print('hi')
+
+        cost = 0
+        for idx in range(self.pc_detector.pcs_edge_idxs.shape[0]):
+
+            pt_idx = self.pc_detector.pcs_edge_idxs[idx]
+            if self.pixels_mask[pt_idx]:
+
+                # Gaussian parameters
+                x, y = self.pixels[pt_idx]
+                sigma = sigma_in/np.linalg.norm(self.pc_detector.pcs[pt_idx, :])
+                # Extract 3-sigma neighborhood
+
+                # Iterate over neighborhood
+
+
+                print('hi')
