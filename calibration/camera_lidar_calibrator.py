@@ -4,6 +4,7 @@ import cv2 as cv
 import gc
 import pyquaternion as pyquat
 from scipy.stats import multivariate_normal
+from scipy.linalg import expm
 
 from calibration.utils.data_utils import *
 from calibration.utils.pc_utils import *
@@ -125,38 +126,120 @@ class CameraLidarCalibrator:
         return (((dist - min_d) / (max_d - min_d)) * 120).astype(np.uint8)
 
     def compute_cost(self, sigma_in):
-        """Compute cost for the current tau"""
+        """Compute cost for the current tau (extrinsics)"""
+
+        # Project lidar points
         self.pc_to_pixels()
 
+        # GMM Cost
         cost = 0
         # iterate over lidar edge points
         for idx in range(self.pc_detector.pcs_edge_idxs.shape[0]):
-
             pt_idx = self.pc_detector.pcs_edge_idxs[idx]
+
+            # check if pixel lands within image bounds
             if self.pixels_mask[pt_idx]:
 
-                # Edge Point Weight
+                # lidar edge weight
                 w_i = self.pc_detector.pcs_edge_scores[pt_idx]
 
-                # Gaussian parameters
+                # gaussian parameters
                 mu = self.pixels[pt_idx, :]
                 sigma = sigma_in/np.linalg.norm(self.pc_detector.pcs[pt_idx, :])
                 cov_mat = np.diag([sigma, sigma])
 
+                # neighborhood params
                 min_x = max(0, int(mu[0] - 3*sigma))
                 max_x = min(self.img_detector.img_w, int(mu[0] + 3*sigma))
                 min_y = max(0, int(mu[1] - 3*sigma))
                 max_y = min(self.img_detector.img_h, int(mu[1] + 3*sigma))
-
-                # Extract 3-sigma neighborhood
                 num_ed_pixels = np.sum(self.img_detector.imgs_edges[min_y: max_y, min_x: max_x])
 
-                # iterate over image edge pixels
+                # iterate over 3-sigma neighborhood
                 for x in range(min_x, max_x):
                     for y in range(min_y, max_y):
-                        if self.img_detector.imgs_edges[y, x] == True:
+
+                        # check if current img pixel is an edge pixel
+                        if self.img_detector.imgs_edges[y, x]:
                             w_j = self.img_detector.imgs_edge_scores[y, x]
                             w_ij = 0.5*(w_i + w_j)/num_ed_pixels
                             cost += w_ij*multivariate_normal.pdf([x, y], mu, cov_mat)
 
         return cost
+
+    def compute_gradient(self, sigma_in):
+
+        # GMM Cost
+        gradient = np.zeros(6)
+
+        omega = self.tau[:3]
+        jac = jacobian(omega)
+
+        # TODO: Simplify
+        angle = np.linalg.norm(omega, 2)
+        axis = omega/angle
+        quat = pyquat.Quaternion(axis=axis, radians=angle)
+        R = quat.rotation_matrix
+
+        # TODO: Simplify
+        f_x = self.K[0, 0]
+        f_y = self.K[1, 1]
+        c_x = self.K[0, 2]
+        c_y = self.K[1, 2]
+
+        # iterate over lidar edge points
+        for idx in range(self.pc_detector.pcs_edge_idxs.shape[0]):
+            pt_idx = self.pc_detector.pcs_edge_idxs[idx]
+
+            # check if pixel lands within image bounds
+            if self.pixels_mask[pt_idx]:
+
+                # lidar edge weight
+                w_i = self.pc_detector.pcs_edge_scores[pt_idx]
+
+                # gaussian parameters
+                mu = self.pixels[pt_idx, :]
+                sigma = sigma_in / np.linalg.norm(self.pc_detector.pcs[pt_idx, :])
+                cov_mat = np.diag([sigma, sigma])
+
+                # neighborhood params
+                min_x = max(0, int(mu[0] - 3 * sigma))
+                max_x = min(self.img_detector.img_w, int(mu[0] + 3 * sigma))
+                min_y = max(0, int(mu[1] - 3 * sigma))
+                max_y = min(self.img_detector.img_h, int(mu[1] + 3 * sigma))
+                num_ed_pixels = np.sum(self.img_detector.imgs_edges[min_y: max_y, min_x: max_x])
+
+                # iterate over 3-sigma neighborhood
+                for x in range(min_x, max_x):
+                    for y in range(min_y, max_y):
+
+                        # check if current img pixel is an edge pixel
+                        if self.img_detector.imgs_edges[y, x]:
+                            w_j = self.img_detector.imgs_edge_scores[y, x]
+                            w_ij = 0.5 * (w_i + w_j) / num_ed_pixels
+
+                            M = -np.dot(skew(R*self.pc_detector.pcs[pt_idx]), jac)
+                            dxc_dtau = np.append(M[0, :], [1, 0, 0])
+                            dyc_dtau = np.append(M[1, :], [0, 1, 0])
+                            dzc_dtau = np.append(M[2, :], [0, 0, 1])
+
+
+                            # TODO: Gaussian derivative
+                            dG_du = 1
+                            dG_dv = 1
+
+                            x_c, y_c, z_c = self.pc_detector.pcs[pt_idx]
+                            du_dxc = f_x/z_c
+                            du_dyc = 0
+                            du_dzc = -(f_x*x_c)/(z_c**2)
+                            dv_dxc = 0
+                            dv_dyc = f_y / z_c
+                            dv_dzc = -(f_y*y_c)/(z_c**2)
+
+                            du_dtau = (du_dxc * dxc_dtau) + (du_dyc * dyc_dtau) + (du_dzc * dzc_dtau)
+                            dv_dtau = (dv_dxc * dxc_dtau) + (dv_dyc * dyc_dtau) + (dv_dzc * dzc_dtau)
+
+                            gradient += (dG_du*du_dtau) + (dG_dv*dv_dtau)
+
+        return gradient
+
