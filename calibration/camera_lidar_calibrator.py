@@ -5,6 +5,7 @@ import gc
 import pyquaternion as pyquat
 from scipy.stats import multivariate_normal
 from scipy.linalg import expm
+from scipy.stats import norm
 
 from calibration.utils.data_utils import *
 from calibration.utils.pc_utils import *
@@ -223,10 +224,9 @@ class CameraLidarCalibrator:
                             dyc_dtau = np.append(M[1, :], [0, 1, 0])
                             dzc_dtau = np.append(M[2, :], [0, 0, 1])
 
-
-                            # TODO: Gaussian derivative
-                            dG_du = 1
-                            dG_dv = 1
+                            # TODO: Correctly derive gaussian derivative wrt u and v
+                            d = np.linalg.norm([x - mu[0], y - mu[1]], 2)
+                            dG_du = dG_dv = norm.pdf(d, 0, sigma)*(-d)/(sigma**2)
 
                             x_c, y_c, z_c = self.pc_detector.pcs[pt_idx]
                             du_dxc = f_x/z_c
@@ -239,7 +239,7 @@ class CameraLidarCalibrator:
                             du_dtau = (du_dxc * dxc_dtau) + (du_dyc * dyc_dtau) + (du_dzc * dzc_dtau)
                             dv_dtau = (dv_dxc * dxc_dtau) + (dv_dyc * dyc_dtau) + (dv_dzc * dzc_dtau)
 
-                            gradient += (dG_du*du_dtau) + (dG_dv*dv_dtau)
+                            gradient = gradient + (dG_du*du_dtau) + (dG_dv*dv_dtau)
 
         return gradient
 
