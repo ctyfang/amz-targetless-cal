@@ -3,6 +3,7 @@ import numpy as np
 import cv2 as cv
 import gc
 import pyquaternion as pyquat
+from scipy.stats import multivariate_normal
 
 from calibration.utils.data_utils import *
 from calibration.utils.pc_utils import *
@@ -28,6 +29,8 @@ class CameraLidarCalibrator:
         self.K = cfg.K
         self.R, self.T = load_lid_cal(cfg.calib_dir)
         self.tau = cfg.tau_init
+
+        self.visualize = visualize
         # TODO: Change the methods below to use the new variables in pc_detector and img_detector
 
     @staticmethod
@@ -66,6 +69,12 @@ class CameraLidarCalibrator:
         inside_mask_y = np.logical_and((self.pixels[:, 1] >= 0),
                                        (self.pixels[:, 1] <= self.img_detector.img_h))
         inside_mask = np.logical_and(inside_mask_x, inside_mask_y)
+
+        if self.visualize:
+            blank = np.zeros((self.img_detector.img_h, self.img_detector.img_w))
+            blank[self.pixels[inside_mask, 1].astype(np.int), self.pixels[inside_mask, 0].astype(np.int)] = 255
+            cv.imshow('Projected Lidar Edges', blank)
+            cv.waitKey(0)
 
         self.pixels_mask = inside_mask
 
@@ -120,17 +129,34 @@ class CameraLidarCalibrator:
         self.pc_to_pixels()
 
         cost = 0
+        # iterate over lidar edge points
         for idx in range(self.pc_detector.pcs_edge_idxs.shape[0]):
 
             pt_idx = self.pc_detector.pcs_edge_idxs[idx]
             if self.pixels_mask[pt_idx]:
 
+                # Edge Point Weight
+                w_i = self.pc_detector.pcs_edge_scores[pt_idx]
+
                 # Gaussian parameters
-                x, y = self.pixels[pt_idx]
+                mu = self.pixels[pt_idx, :]
                 sigma = sigma_in/np.linalg.norm(self.pc_detector.pcs[pt_idx, :])
+                cov_mat = np.diag([sigma, sigma])
+
+                min_x = max(0, int(mu[0] - 3*sigma))
+                max_x = min(self.img_detector.img_w, int(mu[0] + 3*sigma))
+                min_y = max(0, int(mu[1] - 3*sigma))
+                max_y = min(self.img_detector.img_h, int(mu[1] + 3*sigma))
+
                 # Extract 3-sigma neighborhood
+                num_ed_pixels = np.sum(self.img_detector.imgs_edges[min_y: max_y, min_x: max_x])
 
-                # Iterate over neighborhood
+                # iterate over image edge pixels
+                for x in range(min_x, max_x):
+                    for y in range(min_y, max_y):
+                        if self.img_detector.imgs_edges[y, x] == True:
+                            w_j = self.img_detector.imgs_edge_scores[y, x]
+                            w_ij = 0.5*(w_i + w_j)/num_ed_pixels
+                            cost += w_ij*multivariate_normal.pdf([x, y], mu, cov_mat)
 
-
-                print('hi')
+        return cost

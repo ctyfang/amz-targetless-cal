@@ -29,7 +29,7 @@ class ImgEdgeDetector:
         gradient_y = convolve(blurred, [[1, 2, 1], [0, 0, 0], [-1, -2, -1]])
         self.imgs_edge_scores = np.sqrt(
             np.power(gradient_x, 2) + np.power(gradient_y, 2))
-        self.imgs_edges = cv.Canny(self.imgs, 100, 200, L2gradient=True)
+        self.imgs_edges = cv.Canny(self.imgs, 100, 200, L2gradient=True).astype(np.bool)
         self.imgs_edge_scores[np.where(self.imgs_edges == 0)] = 0
         self.imgs_edge_scores = \
             self.imgs_edge_scores/np.amax(self.imgs_edge_scores)
