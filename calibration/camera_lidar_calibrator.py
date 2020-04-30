@@ -37,12 +37,8 @@ class CameraLidarCalibrator:
 
     @staticmethod
     def transform_to_tau(R, T):
-        tau = np.zeros(6)
-        quat = pyquat.Quaternion(matrix=R)
-        tau[:3] = quat.angle * quat.axis
-        tau[3:] = np.squeeze(T)
-
-        return tau
+        r_vec, _ = cv2.Rodrigues(R)
+        return np.hstack((r_vec.T, T.T)).reshape(3,)
 
     def pc_to_pixels(self):
         '''
