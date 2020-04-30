@@ -10,7 +10,7 @@ import open3d as o3d
 class PcEdgeDetector:
 
     def __init__(self, cfg, visualize=True):
-        self.pcs = self.load_pc(cfg.pc_dir, cfg.frames)
+        self.pcs = self.load_pc(cfg.pc_dir, cfg.frames, subsample=cfg.pc_subsample)
 
         self.pcs_edge_idxs = None
         self.pcs_edge_scores = None
@@ -97,17 +97,23 @@ class PcEdgeDetector:
                 self.pcs, self.pcs_edge_idxs, self.pcs_edge_scores)
 
     @staticmethod
-    def load_pc(path, frames):
+    def load_pc(path, frames, subsample=1.0):
         if len(frames) <= 1:
-            return np.fromfile(str(path) + '/velodyne_points/data/' +
-                               str(frames[0]).zfill(10) + '.bin',
-                               dtype=np.float32).reshape(-1, 4)[:, :3]
+            pc = np.fromfile(str(path) + '/velodyne_points/data/' +
+                             str(frames[0]).zfill(10) + '.bin',
+                             dtype=np.float32).reshape(-1, 4)[:, :3]
+
+            return pc[:int(subsample*pc.shape[0]), :]
+
         else:
             pcs = []
             for frame in frames:
-                pcs.append(np.fromfile(str(path) + '/velodyne_points/data/' +
+                curr_pc = (np.fromfile(str(path) + '/velodyne_points/data/' +
                                        str(frame).zfill(10) + '.bin',
                                        dtype=np.float32).reshape(-1, 4)[:, :3])
+
+                curr_pc = curr_pc[:int(subsample*curr_pc.shape[0]), :]
+                pcs.append(curr_pc)
             return pcs
 
     @staticmethod

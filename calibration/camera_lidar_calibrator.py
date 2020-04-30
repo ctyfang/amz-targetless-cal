@@ -2,6 +2,7 @@
 import numpy as np
 import cv2 as cv
 import gc
+import pyquaternion as pyquat
 
 from calibration.utils.data_utils import *
 from calibration.utils.pc_utils import *
@@ -18,22 +19,31 @@ from calibration.img_edge_detector import ImgEdgeDetector
 class CameraLidarCalibrator:
 
     def __init__(self, cfg, visualize=False):
-        self.pc_detecter = PcEdgeDetector(cfg, visualize=visualize)
+        self.pc_detector = PcEdgeDetector(cfg, visualize=visualize)
         gc.collect()
         self.img_detector = ImgEdgeDetector(cfg, visualize=visualize)
         gc.collect()
         self.pixels = None
         self.K = cfg.K
         self.R, self.T = load_lid_cal(cfg.calib_dir)
-
+        self.tau = cfg.tau_init
         # TODO: Change the methods below to use the new variables in pc_detector and img_detector
+
+    @staticmethod
+    def transform_to_tau(R, T):
+        tau = np.zeros(6)
+        quat = pyquat.Quaternion(matrix=R)
+        tau[:3] = quat.angle * quat.axis
+        tau[3:] = np.squeeze(T)
+
+        return tau
 
     def pc_to_pixels(self):
         '''
         Generate pixel coordinate for all points
         '''
-        one_mat = np.ones((self.points.shape[0], 1))
-        point_cloud = np.concatenate((self.points, one_mat), axis=1)
+        one_mat = np.ones((self.pc_detector.pcs.shape[0], 1))
+        point_cloud = np.concatenate((self.pc_detector.pcs, one_mat), axis=1)
 
         # TODO: Perform transform without homogeneous term,
         #       if too memory intensive
@@ -42,11 +52,21 @@ class CameraLidarCalibrator:
         point_cloud_cam = np.matmul(np.hstack((self.R, self.T)), point_cloud.T)
 
         # Remove the Homogeneous Term
-        point_cloud_cam = np.matmul(self.P_rect, point_cloud_cam)
+        point_cloud_cam = np.matmul(self.K, point_cloud_cam)
 
         # Normalize the Points into Camera Frame
         self.pixels = point_cloud_cam[::] / point_cloud_cam[::][-1]
         self.pixels = np.delete(self.pixels, 2, axis=0)
+        self.pixels = self.pixels.T
+
+        # Remove pixels that are outside image
+        inside_mask_x = np.logical_and((self.pixels[:, 0] >= 0),
+                                       (self.pixels[:, 0] <= self.img_detector.img_w))
+        inside_mask_y = np.logical_and((self.pixels[:, 1] >= 0),
+                                       (self.pixels[:, 1] <= self.img_detector.img_h))
+        inside_mask = np.logical_and(inside_mask_x, inside_mask_y)
+
+        self.pixels = self.pixels[inside_mask, :]
 
     def draw_points(self, image=None, FULL=True):
         """
@@ -93,3 +113,11 @@ class CameraLidarCalibrator:
         np.clip(dist, 0, max_d, out=dist)
         # max distance is 120m but usually not usual
         return (((dist - min_d) / (max_d - min_d)) * 120).astype(np.uint8)
+
+    def compute_cost(self, sigma_in):
+        """Compute cost for the current tau"""
+        self.pc_to_pixels()
+        print('hi')
+        # for pc_idx in range(self.pc_detector.pcs_edge_idxs.shape[0]):
+        #     point = self.pc_detector[pc_idx, :]
+        #     print('hi')
