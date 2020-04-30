@@ -232,6 +232,23 @@ class PtCloud():
 
         return cv2.cvtColor(hsv_image, cv2.COLOR_HSV2BGR)
 
+def plot_2d(values):
+    y = range(values.shape[0]+1)
+    x = range(values.shape[1]+1)
+    levels = MaxNLocator(nbins=15).tick_values(np.amin(values),
+                                               np.amax(values))
+    cmap = plt.get_cmap('hot')
+    norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
+    fig, ax0 = plt.subplots(nrows=1)
+    plot = ax0.pcolormesh(x,
+                        y,
+                        values[::-1, :],
+                        cmap=cmap,
+                        norm=norm)
+    fig.colorbar(plot, ax=ax0)
+    ax0.set_title('pcolormesh with levels')
+    plt.axis('equal')
+    plt.show()
 
 def get_argument():
     '''
