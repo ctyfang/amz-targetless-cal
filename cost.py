@@ -52,6 +52,7 @@ def cost(rot_vec, trans_vec, camera_matrix, sigma_in, pc_edge_points,
     # need to make sure trans_vec (3x1)
     pc_edge_points_c = (np.dot(rot_mat, pc_edge_points.T) + trans_vec).T
     cost_map = np.zeros(edge_image.shape)
+    gaus_map = np.zeros(edge_image.shape)
     cost = 0
     for idx in range(pc_edge_points_c.shape[0]):
         # Project edge point onto image
@@ -85,7 +86,10 @@ def cost(rot_vec, trans_vec, camera_matrix, sigma_in, pc_edge_points,
     
         print(f'Cost: {np.sum(cost_patch)/(2*np.sum(cost_patch>0))}')
         cost_map[mu_y, mu_x] = np.sum(cost_patch) / (2 * np.sum(cost_patch > 0))
-    
+        gaus_map[mu_y - top: mu_y + bot,
+                 mu_x - left: mu_x + right] += gauss2d[3*sigma-top: 3*sigma+bot,
+                                                3*sigma-left: 3*sigma+right] 
     plot_2d(cost_map)
+    plot_2d(gaus_map)
     gc.collect()
     return np.sum(cost_map)
