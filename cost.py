@@ -3,7 +3,12 @@ import numpy as np
 import cv2 as cv
 from scipy.ndimage import correlate
 from scipy.linalg import expm
-
+import matplotlib.pyplot as plt
+from matplotlib.colors import BoundaryNorm
+from matplotlib.ticker import MaxNLocator
+from scipy.ndimage.filters import gaussian_filter,convolve
+import gc
+from calibration.utils.img_utils import *
 
 def skew(vector):
     """
@@ -40,54 +45,51 @@ def pairwise_gradient(tau, kernel, camera_matrix, edge_point):
     return
 
 
-def cost(tau, sigma_in, camera_matrix, pc_edge_points, pc_edge_scores,
-         pc_nn_sizes, edge_image, im_edge_scores):
-
+def cost(rot_vec, trans_vec, camera_matrix, sigma_in, pc_edge_points,
+         pc_edge_scores, edge_image, im_edge_scores):
     # Transform pc_edge_points to camera frame
-    rot_vec = tau[:2]
-    trans_vec = tau[2:]
-    rot_mat = expm(skew(rot_vec))
-    pc_edge_points_c = np.dot(rot_mat, pc_edge_points.T) + trans_vec.T
-
+    rot_mat, _ = cv.Rodrigues(rot_vec)
+    # need to make sure trans_vec (3x1)
+    pc_edge_points_c = (np.dot(rot_mat, pc_edge_points.T) + trans_vec).T
+    cost_map = np.zeros(edge_image.shape)
+    gaus_map = np.zeros(edge_image.shape)
     cost = 0
     for idx in range(pc_edge_points_c.shape[0]):
-
         # Project edge point onto image
         curr_point = pc_edge_points_c[idx, :]
         proj_edge_point = np.dot(camera_matrix, curr_point)
         proj_edge_point /= proj_edge_point[2]
+        mu_x, mu_y = proj_edge_point[:2].astype(np.int)
+        if outside_image(edge_image, (mu_y, mu_x)):
+            continue
 
+        sigma = int(sigma_in / np.linalg.norm(curr_point, 2))
         # Get gaussian kernel
-        curr_sigma = sigma_in / np.linalg.norm(curr_point, 2)
-        mu_x, mu_y = proj_edge_point[:2]
-        gauss_kernel = cv.getGaussianKernel(
-            (6 * int(curr_sigma), 6 * int(curr_sigma)), curr_sigma, cv.CV_64F)
-
+        # Distance > 3 sigma is set to 0
+        # and normalized so that the total Kernel = 1
+        gauss2d = getGaussianKernel2D(sigma, False)
+        top, bot, left, right = get_boundry(edge_image, (mu_y, mu_x), sigma)
         # Get image patch inside the kernel
-        edge_image_patch = edge_image[mu_y - 3 * int(curr_sigma):mu_y +
-                                      3 * int(curr_sigma),
-                                      mu_x - 3 * int(curr_sigma):mu_x +
-                                      3 * int(curr_sigma)]
+        edge_scores_patch = im_edge_scores[mu_y - top: mu_y + bot,
+                                           mu_x - left: mu_x + right]
 
-        edge_scores_patch = im_edge_scores[mu_y - 3 * int(curr_sigma):mu_y +
-                                           3 * int(curr_sigma),
-                                           mu_x - 3 * int(curr_sigma):mu_x +
-                                           3 * int(curr_sigma)]
+        # weight = (normalized img score + normalized pc score) / 2 / |Omega_i|
+        # Cost = Weight * Gaussian Kernal
+        edge_scores_patch += pc_edge_scores[idx]
+        edge_scores_patch /= 2
+        kernal_patch = gauss2d[3*sigma-top: 3*sigma+bot,
+                               3*sigma-left: 3*sigma+right]
 
-        # TODO: Handle edge cases (outside bounds, even kernel size)
-        # TODO: Ensure edge_image_patch size matches kernel size
-        # Weight image patch by edge scores
-        weighted_edge_image_patch = np.multiply(edge_image_patch,
-                                                edge_scores_patch)
-        weighted_edge_image_patch /= np.max(im_edge_scores)
-
-        weighted_edge_image_patch += (pc_edge_scores[idx] /
-                                      np.max(pc_edge_scores))
-
-        weighted_edge_image_patch /= (2 * pc_nn_sizes[idx])
-        weighted_edge_image_patch *= (-1)
-
-        curr_point_cost = correlate(weighted_edge_image_patch, gauss_kernel)
-        cost += curr_point_cost
-
-    return cost
+        cost_patch = np.multiply(edge_scores_patch, kernal_patch)
+        if cost_patch.all == 0:
+            continue
+    
+        print(f'Cost: {np.sum(cost_patch)/(2*np.sum(cost_patch>0))}')
+        cost_map[mu_y, mu_x] = np.sum(cost_patch) / (2 * np.sum(cost_patch > 0))
+        gaus_map[mu_y - top: mu_y + bot,
+                 mu_x - left: mu_x + right] += gauss2d[3*sigma-top: 3*sigma+bot,
+                                                3*sigma-left: 3*sigma+right] 
+    plot_2d(cost_map)
+    plot_2d(gaus_map)
+    gc.collect()
+    return np.sum(cost_map)

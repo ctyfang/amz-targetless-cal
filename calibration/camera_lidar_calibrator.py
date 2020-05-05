@@ -9,6 +9,7 @@ from scipy.stats import norm
 
 from calibration.utils.data_utils import *
 from calibration.utils.pc_utils import *
+from calibration.utils.img_utils import *
 
 import matplotlib.pyplot as plt
 from matplotlib.colors import BoundaryNorm
@@ -37,12 +38,8 @@ class CameraLidarCalibrator:
 
     @staticmethod
     def transform_to_tau(R, T):
-        tau = np.zeros(6)
-        quat = pyquat.Quaternion(matrix=R)
-        tau[:3] = quat.angle * quat.axis
-        tau[3:] = np.squeeze(T)
-
-        return tau
+        r_vec, _ = cv2.Rodrigues(R)
+        return np.hstack((r_vec.T, T.T)).reshape(3, )
 
     def pc_to_pixels(self):
         '''
@@ -119,8 +116,8 @@ class CameraLidarCalibrator:
         close distance = red , far distance = blue
         """
         dist = np.sqrt(
-            np.add(np.power(self.points[:, 0],
-                            2), np.power(self.points[:, 1], 2),
+            np.add(np.power(self.points[:, 0], 2),
+                   np.power(self.points[:, 1], 2),
                    np.power(self.points[:, 2], 2)))
         np.clip(dist, 0, max_d, out=dist)
         # max distance is 120m but usually not usual
@@ -128,7 +125,7 @@ class CameraLidarCalibrator:
 
     def compute_cost(self, sigma_in):
         """Compute cost for the current tau (extrinsics)"""
-
+        start_t = time.time()
         # Project lidar points
         self.pc_to_pixels()
 
@@ -165,7 +162,8 @@ class CameraLidarCalibrator:
                             w_j = self.img_detector.imgs_edge_scores[y, x]
                             w_ij = 0.5*(w_i + w_j)/num_ed_pixels
                             cost += w_ij*multivariate_normal.pdf([x, y], mu, cov_mat)
-
+        gc.collect()
+        print(f"Brute Force cost computation time:{time.time() - start_t}")
         return cost
 
     def compute_gradient(self, sigma_in):
@@ -242,4 +240,51 @@ class CameraLidarCalibrator:
                             gradient = gradient + (dG_du*du_dtau) + (dG_dv*dv_dtau)
 
         return gradient
+
+    def cost(self, sigma_in):
+        start_t = time.time()
+        self.pc_to_pixels()
+        cost_map = np.zeros(self.img_detector.imgs_edge_scores.shape)
+        for idx_pc in range(self.pc_detector.pcs_edge_idxs.shape[0]):
+            idx = self.pc_detector.pcs_edge_idxs[idx_pc]
+            # Project edge point onto image
+            # check if pixel lands within image bounds
+            if not self.pixels_mask[idx]:
+                continue
+
+            sigma = int(sigma_in /
+                        np.linalg.norm(self.pc_detector.pcs[idx, :], 2))
+
+            mu_x, mu_y = self.pixels[idx].astype(np.int)
+            # Get gaussian kernel
+            # Distance > 3 sigma is set to 0
+            # and normalized so that the total Kernel = 1
+            gauss2d = getGaussianKernel2D(sigma, False)
+            top, bot, left, right = get_boundry(
+                self.img_detector.imgs_edge_scores, (mu_y, mu_x), sigma)
+            # Get image patch inside the kernel
+            edge_scores_patch = \
+                self.img_detector.imgs_edge_scores[mu_y - top:mu_y + bot,
+                                                   mu_x - left:mu_x + right]
+
+            # weight = (normalized img score + normalized pc score) / 2
+            # weight = weight / |Omega_i|
+            # Cost = Weight * Gaussian Kernal
+            edge_scores_patch += self.pc_detector.pcs_edge_scores[idx]
+            edge_scores_patch /= 2
+            kernal_patch = gauss2d[3 * sigma - top:3 * sigma + bot,
+                                   3 * sigma - left:3 * sigma + right]
+
+            cost_patch = np.multiply(edge_scores_patch, kernal_patch)
+            if cost_patch.all == 0:
+                continue
+
+            # print(f'Cost: {np.sum(cost_patch)/(2*np.sum(cost_patch>0))}')
+            cost_map[mu_y, mu_x] = \
+                np.sum(cost_patch) / (2 * np.sum(cost_patch > 0))
+
+        # plot_2d(cost_map)
+        gc.collect()
+        print(f"Convolution Cost Computation time:{time.time() - start_t}")
+        return np.sum(cost_map)
 
