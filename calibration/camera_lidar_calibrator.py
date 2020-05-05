@@ -70,8 +70,10 @@ class CameraLidarCalibrator:
         inside_mask = np.logical_and(inside_mask_x, inside_mask_y)
 
         if self.visualize:
-            blank = np.zeros((self.img_detector.img_h, self.img_detector.img_w))
-            blank[self.pixels[inside_mask, 1].astype(np.int), self.pixels[inside_mask, 0].astype(np.int)] = 255
+            blank = np.zeros(
+                (self.img_detector.img_h, self.img_detector.img_w))
+            blank[self.pixels[inside_mask, 1].astype(
+                np.int), self.pixels[inside_mask, 0].astype(np.int)] = 255
             cv.imshow('Projected Lidar Edges', blank)
             cv.waitKey(0)
 
@@ -143,7 +145,8 @@ class CameraLidarCalibrator:
 
                 # gaussian parameters
                 mu = self.pixels[pt_idx, :]
-                sigma = sigma_in/np.linalg.norm(self.pc_detector.pcs[pt_idx, :])
+                sigma = sigma_in / \
+                    np.linalg.norm(self.pc_detector.pcs[pt_idx, :])
                 cov_mat = np.diag([sigma, sigma])
 
                 # neighborhood params
@@ -151,7 +154,8 @@ class CameraLidarCalibrator:
                 max_x = min(self.img_detector.img_w, int(mu[0] + 3*sigma))
                 min_y = max(0, int(mu[1] - 3*sigma))
                 max_y = min(self.img_detector.img_h, int(mu[1] + 3*sigma))
-                num_ed_pixels = np.sum(self.img_detector.imgs_edges[min_y: max_y, min_x: max_x])
+                num_ed_pixels = np.sum(
+                    self.img_detector.imgs_edges[min_y: max_y, min_x: max_x])
 
                 # iterate over 3-sigma neighborhood
                 for x in range(min_x, max_x):
@@ -161,7 +165,8 @@ class CameraLidarCalibrator:
                         if self.img_detector.imgs_edges[y, x]:
                             w_j = self.img_detector.imgs_edge_scores[y, x]
                             w_ij = 0.5*(w_i + w_j)/num_ed_pixels
-                            cost += w_ij*multivariate_normal.pdf([x, y], mu, cov_mat)
+                            cost += w_ij * \
+                                multivariate_normal.pdf([x, y], mu, cov_mat)
         gc.collect()
         print(f"Brute Force cost computation time:{time.time() - start_t}")
         return cost
@@ -198,7 +203,8 @@ class CameraLidarCalibrator:
 
                 # gaussian parameters
                 mu = self.pixels[pt_idx, :]
-                sigma = sigma_in / np.linalg.norm(self.pc_detector.pcs[pt_idx, :])
+                sigma = sigma_in / \
+                    np.linalg.norm(self.pc_detector.pcs[pt_idx, :])
                 cov_mat = np.diag([sigma, sigma])
 
                 # neighborhood params
@@ -206,7 +212,8 @@ class CameraLidarCalibrator:
                 max_x = min(self.img_detector.img_w, int(mu[0] + 3 * sigma))
                 min_y = max(0, int(mu[1] - 3 * sigma))
                 max_y = min(self.img_detector.img_h, int(mu[1] + 3 * sigma))
-                num_ed_pixels = np.sum(self.img_detector.imgs_edges[min_y: max_y, min_x: max_x])
+                num_ed_pixels = np.sum(
+                    self.img_detector.imgs_edges[min_y: max_y, min_x: max_x])
 
                 # iterate over 3-sigma neighborhood
                 for x in range(min_x, max_x):
@@ -217,14 +224,17 @@ class CameraLidarCalibrator:
                             w_j = self.img_detector.imgs_edge_scores[y, x]
                             w_ij = 0.5 * (w_i + w_j) / num_ed_pixels
 
-                            M = -np.dot(skew(R*self.pc_detector.pcs[pt_idx]), jac)
+                            M = - \
+                                np.dot(
+                                    skew(R*self.pc_detector.pcs[pt_idx]), jac)
                             dxc_dtau = np.append(M[0, :], [1, 0, 0])
                             dyc_dtau = np.append(M[1, :], [0, 1, 0])
                             dzc_dtau = np.append(M[2, :], [0, 0, 1])
 
                             # TODO: Correctly derive gaussian derivative wrt u and v
                             d = np.linalg.norm([x - mu[0], y - mu[1]], 2)
-                            dG_du = dG_dv = norm.pdf(d, 0, sigma)*(-d)/(sigma**2)
+                            dG_du = dG_dv = norm.pdf(
+                                d, 0, sigma)*(-d)/(sigma**2)
 
                             x_c, y_c, z_c = self.pc_detector.pcs[pt_idx]
                             du_dxc = f_x/z_c
@@ -234,10 +244,13 @@ class CameraLidarCalibrator:
                             dv_dyc = f_y / z_c
                             dv_dzc = -(f_y*y_c)/(z_c**2)
 
-                            du_dtau = (du_dxc * dxc_dtau) + (du_dyc * dyc_dtau) + (du_dzc * dzc_dtau)
-                            dv_dtau = (dv_dxc * dxc_dtau) + (dv_dyc * dyc_dtau) + (dv_dzc * dzc_dtau)
+                            du_dtau = (du_dxc * dxc_dtau) + \
+                                (du_dyc * dyc_dtau) + (du_dzc * dzc_dtau)
+                            dv_dtau = (dv_dxc * dxc_dtau) + \
+                                (dv_dyc * dyc_dtau) + (dv_dzc * dzc_dtau)
 
-                            gradient = gradient + (dG_du*du_dtau) + (dG_dv*dv_dtau)
+                            gradient = gradient + \
+                                (dG_du*du_dtau) + (dG_dv*dv_dtau)
 
         return gradient
 
@@ -259,6 +272,7 @@ class CameraLidarCalibrator:
             # Get gaussian kernel
             # Distance > 3 sigma is set to 0
             # and normalized so that the total Kernel = 1
+            # BUG: In getGaussianKernel2D
             gauss2d = getGaussianKernel2D(sigma, False)
             top, bot, left, right = get_boundry(
                 self.img_detector.imgs_edge_scores, (mu_y, mu_x), sigma)
@@ -270,7 +284,11 @@ class CameraLidarCalibrator:
             # weight = (normalized img score + normalized pc score) / 2
             # weight = weight / |Omega_i|
             # Cost = Weight * Gaussian Kernal
+            # BUG: Only the pixels that contain values > 0 in the edge_scores_patch
+            # should be added self.pc_detector_pcs_edge_scores[idx] to. The 0 pixels
+            # should remain 0
             edge_scores_patch += self.pc_detector.pcs_edge_scores[idx]
+            # BUG: I think you are dividing two times by two. Here and on line 289.
             edge_scores_patch /= 2
             kernal_patch = gauss2d[3 * sigma - top:3 * sigma + bot,
                                    3 * sigma - left:3 * sigma + right]
@@ -287,4 +305,3 @@ class CameraLidarCalibrator:
         gc.collect()
         print(f"Convolution Cost Computation time:{time.time() - start_t}")
         return np.sum(cost_map)
-
