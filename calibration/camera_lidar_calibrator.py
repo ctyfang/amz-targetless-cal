@@ -22,16 +22,22 @@ from calibration.img_edge_detector import ImgEdgeDetector
 
 class CameraLidarCalibrator:
 
-    def __init__(self, cfg, visualize=False):
+    def __init__(self, cfg, visualize=False, tau_init=None):
         self.pc_detector = PcEdgeDetector(cfg, visualize=visualize)
         gc.collect()
         self.img_detector = ImgEdgeDetector(cfg, visualize=visualize)
         gc.collect()
         self.pixels = None
         self.pixels_mask = None
-        self.K = cfg.K
+        self.K = np.asarray(cfg.K)
         self.R, self.T = load_lid_cal(cfg.calib_dir)
-        self.tau = cfg.tau_init
+
+        if tau_init:
+            self.tau = tau_init
+        elif isinstance(self.R, np.ndarray) and isinstance(self.T, np.ndarray):
+            self.tau = self.transform_to_tau(self.R, self.T)
+        else:
+            self.tau = np.zeros((1, 5))
 
         self.visualize = visualize
         # TODO: Change the methods below to use the new variables in pc_detector and img_detector
@@ -39,7 +45,7 @@ class CameraLidarCalibrator:
     @staticmethod
     def transform_to_tau(R, T):
         r_vec, _ = cv2.Rodrigues(R)
-        return np.hstack((r_vec.T, T.T)).reshape(3, )
+        return np.hstack((r_vec.T, T.T)).reshape(6, )
 
     def pc_to_pixels(self):
         '''
@@ -86,28 +92,30 @@ class CameraLidarCalibrator:
         """
 
         if image is not None:
-            image = np.dstack((image, image, image))
+            image = np.uint8(np.dstack((image, image, image)))*255
+            cv.imshow('Before projection', image)
+            cv.waitKey(0)
+
             hsv_image = cv.cvtColor(image, cv.COLOR_BGR2HSV)
         else:
-            hsv_image = np.zeros(self.img.shape).astype(np.uint8)
+            hsv_image = np.zeros(self.img_detector.imgs.shape).astype(np.uint8)
 
         color = self.pc_to_colors()
         if FULL:
-            index = range(self.pixels.shape[1])
+            index = range(self.pixels.shape[0])
         else:
-            index = np.random.choice(self.pixels.shape[1],
-                                     size=int(self.pixels.shape[1] / 10),
+            index = np.random.choice(self.pixels.shape[0],
+                                     size=int(self.pixels.shape[0] / 10),
                                      replace=False)
         for i in index:
-            if self.points[i, 0] < 0:
+            if self.pc_detector.pcs[i, 0] < 0:
                 continue
-            if ((self.pixels[0, i] < 0) | (self.pixels[1, i] < 0) |
-                (self.pixels[0, i] > hsv_image.shape[1]) |
-                    (self.pixels[1, i] > hsv_image.shape[0])):
+            if self.pixels_mask[i] is False:
                 continue
+
             cv.circle(
                 hsv_image,
-                (np.int32(self.pixels[0, i]), np.int32(self.pixels[1, i])), 1,
+                (np.int32(self.pixels[i, 0]), np.int32(self.pixels[i, 1])), 1,
                 (int(color[i]), 255, 255), -1)
 
         return cv.cvtColor(hsv_image, cv.COLOR_HSV2BGR)
@@ -118,9 +126,9 @@ class CameraLidarCalibrator:
         close distance = red , far distance = blue
         """
         dist = np.sqrt(
-            np.add(np.power(self.points[:, 0], 2),
-                   np.power(self.points[:, 1], 2),
-                   np.power(self.points[:, 2], 2)))
+            np.add(np.power(self.pc_detector.pcs[:, 0], 2),
+                   np.power(self.pc_detector.pcs[:, 1], 2),
+                   np.power(self.pc_detector.pcs[:, 2], 2)))
         np.clip(dist, 0, max_d, out=dist)
         # max distance is 120m but usually not usual
         return (((dist - min_d) / (max_d - min_d)) * 120).astype(np.uint8)
@@ -315,8 +323,13 @@ class CameraLidarCalibrator:
         while iter < max_iters:
 
             # Visualize current projection
+            if self.visualize:
+                self.pc_to_pixels()
+                proj_img = self.draw_points()
+                cv.imshow('PC Projection', proj_img)
+                cv.waitKey(0)
 
-            curr_cost = self.compute_cost(sigma_in)
+            curr_cost = self.compute_conv_cost(sigma_in)
             self.tau -= learning_rate*self.compute_gradient(sigma_in)
 
         # Plot cost over the iterations
