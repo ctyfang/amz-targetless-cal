@@ -23,7 +23,7 @@ from calibration.img_edge_detector import ImgEdgeDetector
 class CameraLidarCalibrator:
 
     def __init__(self, cfg, visualize=False, tau_init=None):
-
+        self.visualize = visualize
         self.projected_points = None
         self.points_cam_frame = None
         self.projection_mask = None
@@ -37,12 +37,14 @@ class CameraLidarCalibrator:
         else:
             self.tau = np.zeros((1, 6))
 
-        self.visualize = visualize
-
         self.pc_detector = PcEdgeDetector(cfg, visualize=visualize)
         gc.collect()
         self.img_detector = ImgEdgeDetector(cfg, visualize=visualize)
         gc.collect()
+
+        if visualize:
+            self.draw_all_points(self.pc_detector.pcs_edge_scores)
+            self.draw_edge_points()
 
         # TODO: Change the methods below to use the new variables in pc_detector and img_detector
 
@@ -105,6 +107,71 @@ class CameraLidarCalibrator:
         #         np.int), self.projected_points[inside_mask, 0].astype(np.int)] = 255
         #     cv.imshow('Projected Lidar Edges', blank)
         #     cv.waitKey(0)
+
+    def draw_all_points(self, score=None, img=None):
+        """
+        Draw all points within corresponding camera's FoV on image provided.
+        """
+        if img is None:
+            image = self.img_detector.imgs.copy()
+        else:
+            image = img
+
+        colors = self.scalar_to_color(score=score)
+        colors_valid = colors[self.projection_mask]
+
+        projected_points_valid = self.projected_points[self.projection_mask]
+
+        for pixel, color in zip(projected_points_valid, colors_valid):
+            image[pixel[1].astype(
+                np.int), pixel[0].astype(np.int), :] = color
+
+        cv.imshow('Projected Point Cloud on Image', image)
+        cv.waitKey(0)
+        cv.destroyAllWindows()
+
+    def draw_edge_points(self, score=None, img=None):
+        """
+        Draw only edge points within corresponding camera's FoV on image provided.
+        """
+
+        if img is None:
+            image = self.img_detector.imgs.copy()
+        else:
+            image = img
+
+        colors = self.scalar_to_color()
+        colors_valid = colors[np.logical_and(
+            self.projection_mask, self.pc_detector.pcs_edge_masks)]
+
+        projected_points_valid = self.projected_points[np.logical_and(
+            self.projection_mask, self.pc_detector.pcs_edge_masks)]
+
+        for pixel, color in zip(projected_points_valid, colors_valid):
+            image[pixel[1].astype(
+                np.int), pixel[0].astype(np.int), :] = color
+
+        cv.imshow('Projected Edge Points on Image', image)
+        cv.waitKey(0)
+        cv.destroyAllWindows()
+
+    def scalar_to_color(self, score=None, min_d=0, max_d=60):
+        """
+        print Color(HSV's H value) corresponding to score
+        """
+        if score is None:
+            score = np.sqrt(
+                np.power(self.points_cam_frame[:, 0], 2) +
+                np.power(self.points_cam_frame[:, 1], 2) +
+                np.power(self.points_cam_frame[:, 2], 2))
+
+        np.clip(score, 0, max_d, out=score)
+        # max distance is 120m but usually not usual
+
+        norm = plt.Normalize()
+        colors = plt.cm.jet(norm(score))
+
+        return (colors[:, :3] * 255).astype(np.uint8)
 
     def draw_points(self, image=None, FULL=True):
         """
