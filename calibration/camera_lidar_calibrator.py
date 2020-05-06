@@ -125,7 +125,7 @@ class CameraLidarCalibrator:
         # max distance is 120m but usually not usual
         return (((dist - min_d) / (max_d - min_d)) * 120).astype(np.uint8)
 
-    def compute_cost(self, sigma_in):
+    def compute_bf_cost(self, sigma_in):
         """Compute cost for the current tau (extrinsics)"""
         start_t = time.time()
         # Project lidar points
@@ -254,7 +254,7 @@ class CameraLidarCalibrator:
 
         return gradient
 
-    def cost(self, sigma_in):
+    def compute_conv_cost(self, sigma_in):
         start_t = time.time()
         self.pc_to_pixels()
         cost_map = np.zeros(self.img_detector.imgs_edge_scores.shape)
@@ -305,3 +305,18 @@ class CameraLidarCalibrator:
         gc.collect()
         print(f"Convolution Cost Computation time:{time.time() - start_t}")
         return np.sum(cost_map)
+
+    def optimize(self, sigma_in, max_iters=10):
+
+        iter = 0
+        learning_rate = 1e-3
+        # TODO: Backtracking line learning rate
+
+        while iter < max_iters:
+
+            # Visualize current projection
+
+            curr_cost = self.compute_cost(sigma_in)
+            self.tau -= learning_rate*self.compute_gradient(sigma_in)
+
+        # Plot cost over the iterations
