@@ -10,9 +10,11 @@ import open3d as o3d
 class PcEdgeDetector:
 
     def __init__(self, cfg, visualize=True):
-        self.pcs = self.load_pc(cfg.pc_dir, cfg.frames, subsample=cfg.pc_subsample)
+        self.pcs = self.load_pc(cfg.pc_dir, cfg.frames,
+                                subsample=cfg.pc_subsample)
 
         self.pcs_edge_idxs = None
+        self.pcs_edge_masks = None
         self.pcs_edge_scores = None
         self.pcs_max_edge_score = None
         self.pcs_nn_sizes = None
@@ -21,8 +23,8 @@ class PcEdgeDetector:
         self.PC_ED_RAD_NN = cfg.pc_ed_rad_nn
         self.PC_ED_NUM_NN = cfg.pc_ed_num_nn
 
-        self.pc_detect(self.PC_ED_SCORE_THR, self.PC_ED_NUM_NN,
-                       self.PC_ED_RAD_NN, visualize=visualize)
+        # self.pc_detect(self.PC_ED_SCORE_THR, self.PC_ED_NUM_NN,
+        #                self.PC_ED_RAD_NN, visualize=visualize)
 
     def pc_detect(self, thresh=0.6, num_nn=100, rad_nn=0.1, visualize=False):
         """
@@ -73,13 +75,14 @@ class PcEdgeDetector:
         print(f"Total pc scoring time:{time.time() - start_t}")
 
         # Remove all points with an edge score below the threshold
-        score_mask = self.pcs_edge_scores > thresh
-        self.pcs_edge_idxs = np.argwhere(score_mask)
+        self.pcs_edge_masks = self.pcs_edge_scores > thresh
+        self.pcs_edge_idxs = np.argwhere(self.pcs_edge_masks)
         self.pcs_edge_idxs = np.squeeze(self.pcs_edge_idxs)
 
         # Exclude boundary points in final thresholding
         # and max score calculation
-        pc_boundary_idxs = self.get_first_and_last_channel_idxs(self.pcs)
+        pc_boundary_idxs = self.get_first_and_last_channels_idxs(self.pcs)
+        self.pcs_edge_masks[pc_boundary_idxs] = False
         boundary_mask = [
             (edge_idx not in pc_boundary_idxs) for edge_idx in self.pcs_edge_idxs
         ]
@@ -146,7 +149,7 @@ class PcEdgeDetector:
         return planarity
 
     @staticmethod
-    def get_first_and_last_channel_idxs(pc, hor_res=0.2):
+    def get_first_and_last_channels_idxs(pc, ch_to_remove=3, hor_res=0.2):
         x = pc[:, 0]
         y = pc[:, 1]
         z = pc[:, 2]
@@ -154,7 +157,7 @@ class PcEdgeDetector:
         polar_angle = np.arctan2(np.sqrt(np.square(x) + np.square(y)), z)
 
         # Find the indices of the 360 / horizontal_resolution smallest/largest polar angles
-        size_channel = 2 * int(360 / hor_res)
+        size_channel = 3 * int(360 / hor_res)
         neg_mask_smallest_angle = np.argpartition(
             polar_angle, size_channel)[:size_channel]
         neg_mask_largest_angle = np.argpartition(
@@ -183,11 +186,11 @@ class PcEdgeDetector:
         norm = matplotlib.colors.Normalize(
             vmin=vmin, vmax=vmax, clip=True)
         mapper = cm.ScalarMappable(norm=norm, cmap=cm.jet)
-        colors = np.asarray([mapper.to_rgba(x)[:3] for x in scores])
+        colors = np.asarray(mapper.to_rgba(scores))
 
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(xyz)
-        pcd.colors = o3d.utility.Vector3dVector(colors)
+        pcd.colors = o3d.utility.Vector3dVector(colors[:, :3])
 
         vis = o3d.visualization.Visualizer()
         vis.create_window()
