@@ -23,12 +23,10 @@ from calibration.img_edge_detector import ImgEdgeDetector
 class CameraLidarCalibrator:
 
     def __init__(self, cfg, visualize=False, tau_init=None):
-        self.pc_detector = PcEdgeDetector(cfg, visualize=visualize)
-        gc.collect()
-        self.img_detector = ImgEdgeDetector(cfg, visualize=visualize)
-        gc.collect()
-        self.pixels = None
-        self.pixels_mask = None
+
+        self.projected_points = None
+        self.points_cam_frame = None
+        self.projection_mask = None
         self.K = np.asarray(cfg.K)
         self.R, self.T = load_lid_cal(cfg.calib_dir)
 
@@ -37,9 +35,15 @@ class CameraLidarCalibrator:
         elif isinstance(self.R, np.ndarray) and isinstance(self.T, np.ndarray):
             self.tau = self.transform_to_tau(self.R, self.T)
         else:
-            self.tau = np.zeros((1, 5))
+            self.tau = np.zeros((1, 6))
 
         self.visualize = visualize
+
+        self.pc_detector = PcEdgeDetector(cfg, visualize=visualize)
+        gc.collect()
+        self.img_detector = ImgEdgeDetector(cfg, visualize=visualize)
+        gc.collect()
+
         # TODO: Change the methods below to use the new variables in pc_detector and img_detector
 
     @staticmethod
@@ -53,9 +57,11 @@ class CameraLidarCalibrator:
         T = tau[3:].reshape((3, 1))
         return R, T
 
-    def pc_to_pixels(self):
+    def project_point_cloud(self):
         '''
-        Generate pixel coordinate for all points
+        Transform all points of the point cloud into the camera frame and then
+        projects all points to the image plane. Also return a binary mask to 
+        obtain all points with a valid projection.
         '''
         # Compute R and T from current tau
         self.R, self.T = self.tau_to_transform(self.tau)
@@ -66,33 +72,39 @@ class CameraLidarCalibrator:
         # TODO: Perform transform without homogeneous term,
         #       if too memory intensive
 
-        # Project point into Camera Frame
-        point_cloud_cam = np.matmul(np.hstack((self.R, self.T)), point_cloud.T)
+        # Transform points into the camera frame
+        self.points_cam_frame = np.matmul(
+            np.hstack((self.R, self.T)), point_cloud.T)
 
-        # Remove the Homogeneous Term
-        point_cloud_cam = np.matmul(self.K, point_cloud_cam)
+        # Project points into image plane and normalize
+        self.projected_points = np.matmul(self.K, self.points_cam_frame)
+        self.projected_points = self.projected_points[::] / \
+            self.projected_points[::][-1]
+        self.projected_points = np.delete(self.projected_points, 2, axis=0)
+        self.projected_points = self.projected_points.T
 
-        # Normalize the Points into Camera Frame
-        self.pixels = point_cloud_cam[::] / point_cloud_cam[::][-1]
-        self.pixels = np.delete(self.pixels, 2, axis=0)
-        self.pixels = self.pixels.T
+        # Remove points that were behind the camera
+        self.points_cam_frame = self.points_cam_frame.T
+        in_front_of_camera_mask = self.points_cam_frame[:, 2] > 0
 
         # Remove pixels that are outside image
-        inside_mask_x = np.logical_and((self.pixels[:, 0] >= 0),
-                                       (self.pixels[:, 0] <= self.img_detector.img_w))
-        inside_mask_y = np.logical_and((self.pixels[:, 1] >= 0),
-                                       (self.pixels[:, 1] <= self.img_detector.img_h))
+        inside_mask_x = np.logical_and((self.projected_points[:, 0] >= 0),
+                                       (self.projected_points[:, 0] <= self.img_detector.img_w))
+        inside_mask_y = np.logical_and((self.projected_points[:, 1] >= 0),
+                                       (self.projected_points[:, 1] <= self.img_detector.img_h))
         inside_mask = np.logical_and(inside_mask_x, inside_mask_y)
+
+        # Final projection mask
+        self.projection_mask = np.logical_and(
+            inside_mask, in_front_of_camera_mask)
 
         # if self.visualize:
         #     blank = np.zeros(
         #         (self.img_detector.img_h, self.img_detector.img_w))
-        #     blank[self.pixels[inside_mask, 1].astype(
-        #         np.int), self.pixels[inside_mask, 0].astype(np.int)] = 255
+        #     blank[self.projected_points[inside_mask, 1].astype(
+        #         np.int), self.projected_points[inside_mask, 0].astype(np.int)] = 255
         #     cv.imshow('Projected Lidar Edges', blank)
         #     cv.waitKey(0)
-
-        self.pixels_mask = inside_mask
 
     def draw_points(self, image=None, FULL=True):
         """
@@ -274,8 +286,10 @@ class CameraLidarCalibrator:
 
                             # TODO: Correctly derive gaussian derivative wrt u and v
                             u, v = x - mu[0], y - mu[1]
-                            dG_du = self.gaussian_pdf_deriv(u, v, sigma, wrt='u')
-                            dG_dv = self.gaussian_pdf_deriv(u, v, sigma, wrt='v')
+                            dG_du = self.gaussian_pdf_deriv(
+                                u, v, sigma, wrt='u')
+                            dG_dv = self.gaussian_pdf_deriv(
+                                u, v, sigma, wrt='v')
 
                             x_c, y_c, z_c = self.pc_detector.pcs[pt_idx]
                             du_dxc = f_x/z_c
@@ -291,7 +305,7 @@ class CameraLidarCalibrator:
                                       (dv_dyc * dyc_dtau) + (dv_dzc * dzc_dtau)
 
                             gradient = gradient + \
-                                       w_ij*((dG_du*du_dtau) + (dG_dv*dv_dtau))
+                                w_ij*((dG_du*du_dtau) + (dG_dv*dv_dtau))
 
                 # print(f"One projected lidar point gradient component time={time.time()-start_time}")
 
@@ -337,9 +351,8 @@ class CameraLidarCalibrator:
             nonzero_idxs = np.argwhere(edge_scores_patch)
             if len(nonzero_idxs) == 0:
                 continue
-
-
-            edge_scores_patch[nonzero_idxs[:, 0], nonzero_idxs[:, 1]] += self.pc_detector.pcs_edge_scores[idx]
+            edge_scores_patch[nonzero_idxs[:, 0], nonzero_idxs[:, 1]
+                              ] += self.pc_detector.pcs_edge_scores[idx]
 
             kernel_patch = gauss2d[3 * sigma - top:3 * sigma + bot,
                                    3 * sigma - left:3 * sigma + right]
