@@ -23,9 +23,6 @@ class PcEdgeDetector:
         self.PC_ED_RAD_NN = cfg.pc_ed_rad_nn
         self.PC_ED_NUM_NN = cfg.pc_ed_num_nn
 
-        self.pc_detect(self.PC_ED_SCORE_THR, self.PC_ED_NUM_NN,
-                       self.PC_ED_RAD_NN, visualize=visualize)
-
     def pc_detect(self, thresh=0.6, num_nn=100, rad_nn=0.1, visualize=False):
         """
         Compute edge scores for pointcloud

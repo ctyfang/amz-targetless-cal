@@ -20,8 +20,9 @@ cfg.pc_dir = input_dir
 cfg.img_dir = input_dir
 cfg.calib_dir = calib_dir
 
-# # Detect edges from scratch
-# calibrator = CameraLidarCalibrator(cfg, visualize=False)
+# Detect edges from scratch
+# calibrator = CameraLidarCalibrator(cfg, visualize=True)
+
 # with open('./output/calibrator.pkl', 'wb') as output_pkl:
 #     pickle.dump(calibrator, output_pkl, pickle.HIGHEST_PROTOCOL)
 
@@ -30,9 +31,14 @@ with open('./output/calibrator.pkl', 'rb') as input_pkl:
     calibrator = pickle.load(input_pkl)
     calibrator.visualize = True
 
+calibrator.draw_edge_points(
+    score=calibrator.pc_detector.pcs_edge_scores, image=calibrator.img_detector.imgs_edge_scores)
+
+print('hi')
+
 # print(calibrator.compute_conv_cost(120))
 # print(calibrator.compute_bf_cost(120))
 # np.save('test/pc_edge_scores.npy', calibrator.pc_detector.pcs_edge_scores)
 # np.save('test/pc_edge_idx.npy', calibrator.pc_detector.pcs_edge_idxs)
 
-calibrator.optimize(120, max_iters=1)
+# calibrator.optimize(120, max_iters=1)

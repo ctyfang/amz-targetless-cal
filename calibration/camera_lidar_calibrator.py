@@ -37,18 +37,29 @@ class CameraLidarCalibrator:
         else:
             self.tau = np.zeros((1, 6))
 
+        # Load point clouds/images into the detectors
         self.pc_detector = PcEdgeDetector(cfg, visualize=visualize)
-        gc.collect()
         self.img_detector = ImgEdgeDetector(cfg, visualize=visualize)
-        gc.collect()
 
+        # Calculate projected_points, points_cam_frame, projection_mask
         self.project_point_cloud()
 
+        # Visualize projection of point cloud with current extrinsics
         if visualize:
-            self.draw_all_points(self.pc_detector.pcs_edge_scores)
-            self.draw_edge_points()
+            self.draw_all_points()
 
-        # TODO: Change the methods below to use the new variables in pc_detector and img_detector
+        # Detect edges
+        self.pc_detector.pc_detect(cfg.pc_ed_score_thr, cfg.pc_ed_num_nn,
+                                   cfg.pc_ed_rad_nn)
+        gc.collect()
+        self.img_detector.img_detect()
+        gc.collect()
+
+        if visualize:
+            # self.draw_all_points(score=self.pc_detector.pcs_edge_scores)
+            self.draw_edge_points()
+            self.draw_edge_points(
+                score=self.pc_detector.pcs_edge_scores, image=self.img_detector.imgs_edge_scores)
 
     @staticmethod
     def transform_to_tau(R, T):
@@ -91,7 +102,7 @@ class CameraLidarCalibrator:
         self.points_cam_frame = self.points_cam_frame.T
         in_front_of_camera_mask = self.points_cam_frame[:, 2] > 0
 
-        # Remove pixels that are outside image
+        # Remove projected points that are outside of the image
         inside_mask_x = np.logical_and((self.projected_points[:, 0] >= 0),
                                        (self.projected_points[:, 0] <= self.img_detector.img_w))
         inside_mask_y = np.logical_and((self.projected_points[:, 1] >= 0),
@@ -101,14 +112,6 @@ class CameraLidarCalibrator:
         # Final projection mask
         self.projection_mask = np.logical_and(
             inside_mask, in_front_of_camera_mask)
-
-        # if self.visualize:
-        #     blank = np.zeros(
-        #         (self.img_detector.img_h, self.img_detector.img_w))
-        #     blank[self.projected_points[inside_mask, 1].astype(
-        #         np.int), self.projected_points[inside_mask, 0].astype(np.int)] = 255
-        #     cv.imshow('Projected Lidar Edges', blank)
-        #     cv.waitKey(0)
 
     def draw_all_points(self, score=None, img=None):
         """
@@ -132,15 +135,16 @@ class CameraLidarCalibrator:
         cv.waitKey(0)
         cv.destroyAllWindows()
 
-    def draw_edge_points(self, score=None, img=None):
+    def draw_edge_points(self, score=None, image=None):
         """
         Draw only edge points within corresponding camera's FoV on image provided.
         """
 
-        if img is None:
+        if image is None:
             image = self.img_detector.imgs.copy()
         else:
-            image = img
+            image = (image.copy() * 255).astype(np.uint8)
+            image = np.dstack((image, image, image))
 
         colors = self.scalar_to_color()
         colors_valid = colors[np.logical_and(
@@ -192,20 +196,22 @@ class CameraLidarCalibrator:
 
         color = self.pc_to_colors()
         if FULL:
-            index = range(self.pixels.shape[0])
+            index = range(self.projected_points.shape[0])
         else:
-            index = np.random.choice(self.pixels.shape[0],
-                                     size=int(self.pixels.shape[0] / 10),
+            index = np.random.choice(self.projected_points.shape[0],
+                                     size=int(
+                                         self.projected_points.shape[0] / 10),
                                      replace=False)
         for i in index:
             if self.pc_detector.pcs[i, 0] < 0:
                 continue
-            if self.pixels_mask[i] is False:
+            if self.projection_mask[i] is False:
                 continue
 
             cv.circle(
                 hsv_image,
-                (np.int32(self.pixels[i, 0]), np.int32(self.pixels[i, 1])), 1,
+                (np.int32(self.projected_points[i, 0]), np.int32(
+                    self.projected_points[i, 1])), 1,
                 (int(color[i]), 255, 255), -1)
 
         return cv.cvtColor(hsv_image, cv.COLOR_HSV2BGR)
@@ -226,8 +232,6 @@ class CameraLidarCalibrator:
     def compute_bf_cost(self, sigma_in):
         """Compute cost for the current tau (extrinsics)"""
         start_t = time.time()
-        # Project lidar points
-        self.pc_to_pixels()
 
         # GMM Cost
         cost = 0
@@ -235,14 +239,14 @@ class CameraLidarCalibrator:
         for idx in range(self.pc_detector.pcs_edge_idxs.shape[0]):
             pt_idx = self.pc_detector.pcs_edge_idxs[idx]
 
-            # check if pixel lands within image bounds
-            if self.pixels_mask[pt_idx]:
+            # check if projected point lands within image bounds
+            if self.projection_mask[pt_idx]:
 
                 # lidar edge weight
                 w_i = self.pc_detector.pcs_edge_scores[pt_idx]
 
                 # gaussian parameters
-                mu = self.pixels[pt_idx, :]
+                mu = self.projected_points[pt_idx, :]
                 sigma = sigma_in / \
                     np.linalg.norm(self.pc_detector.pcs[pt_idx, :])
                 cov_mat = np.diag([sigma, sigma])
@@ -252,7 +256,7 @@ class CameraLidarCalibrator:
                 max_x = min(self.img_detector.img_w, int(mu[0] + 3*sigma))
                 min_y = max(0, int(mu[1] - 3*sigma))
                 max_y = min(self.img_detector.img_h, int(mu[1] + 3*sigma))
-                num_ed_pixels = np.sum(
+                num_ed_projected_points = np.sum(
                     self.img_detector.imgs_edges[min_y: max_y, min_x: max_x])
 
                 # iterate over 3-sigma neighborhood
@@ -262,7 +266,7 @@ class CameraLidarCalibrator:
                         # check if current img pixel is an edge pixel
                         if self.img_detector.imgs_edges[y, x]:
                             w_j = self.img_detector.imgs_edge_scores[y, x]
-                            w_ij = 0.5*(w_i + w_j)/num_ed_pixels
+                            w_ij = 0.5*(w_i + w_j)/num_ed_projected_points
                             cost += w_ij * \
                                 multivariate_normal.pdf([x, y], mu, cov_mat)
         gc.collect()
@@ -309,14 +313,14 @@ class CameraLidarCalibrator:
         for idx in range(self.pc_detector.pcs_edge_idxs.shape[0]):
             pt_idx = self.pc_detector.pcs_edge_idxs[idx]
 
-            # check if pixel lands within image bounds
-            if self.pixels_mask[pt_idx]:
+            # check if projected point lands within image bounds
+            if self.projection_mask[pt_idx]:
                 start_time = time.time()
                 # lidar edge weight
                 w_i = self.pc_detector.pcs_edge_scores[pt_idx]
 
                 # gaussian parameters
-                mu = self.pixels[pt_idx, :]
+                mu = self.projected_points[pt_idx, :]
                 sigma = sigma_in / \
                     np.linalg.norm(self.pc_detector.pcs[pt_idx, :])
                 cov_mat = np.diag([sigma, sigma])
@@ -326,7 +330,7 @@ class CameraLidarCalibrator:
                 max_x = min(self.img_detector.img_w, int(mu[0] + 3 * sigma))
                 min_y = max(0, int(mu[1] - 3 * sigma))
                 max_y = min(self.img_detector.img_h, int(mu[1] + 3 * sigma))
-                num_ed_pixels = np.sum(
+                num_ed_projected_points = np.sum(
                     self.img_detector.imgs_edges[min_y: max_y, min_x: max_x])
 
                 # iterate over 3-sigma neighborhood
@@ -337,7 +341,7 @@ class CameraLidarCalibrator:
                         if self.img_detector.imgs_edges[y, x]:
 
                             w_j = self.img_detector.imgs_edge_scores[y, x]
-                            w_ij = 0.5 * (w_i + w_j) / num_ed_pixels
+                            w_ij = 0.5 * (w_i + w_j) / num_ed_projected_points
 
                             M = - \
                                 np.dot(
@@ -389,15 +393,15 @@ class CameraLidarCalibrator:
 
             idx = self.pc_detector.pcs_edge_idxs[idx_pc]
 
-            # check if projected pixel lands within image bounds
-            if not self.pixels_mask[idx]:
+            # check if projected projected point lands within image bounds
+            if not self.projection_mask[idx]:
                 continue
 
             # TODO: Use camera frame pointcloud for sigma scaling
             sigma = int(sigma_in /
                         np.linalg.norm(self.pc_detector.pcs[idx, :], 2))
 
-            mu_x, mu_y = self.pixels[idx].astype(np.int)
+            mu_x, mu_y = self.projected_points[idx].astype(np.int)
             # Get gaussian kernel
             # Distance > 3 sigma is set to 0
             # and normalized so that the total Kernel = 1
@@ -413,8 +417,8 @@ class CameraLidarCalibrator:
             # weight = (normalized img score + normalized pc score) / 2
             # weight = weight / |Omega_i|
             # Cost = Weight * Gaussian Kernal
-            # BUG: Only the pixels that contain values > 0 in the edge_scores_patch
-            # should be added self.pc_detector_pcs_edge_scores[idx] to. The 0 pixels
+            # BUG: Only the projected_points that contain values > 0 in the edge_scores_patch
+            # should be added self.pc_detector_pcs_edge_scores[idx] to. The 0 projected_points
             # should remain 0
             nonzero_idxs = np.argwhere(edge_scores_patch)
             if len(nonzero_idxs) == 0:
@@ -427,7 +431,7 @@ class CameraLidarCalibrator:
 
             cost_patch = np.multiply(edge_scores_patch, kernel_patch)
 
-            # Normalize by number of edge pixels in the neighborhood
+            # Normalize by number of edge projected_points in the neighborhood
             # print(f'Cost: {np.sum(cost_patch)/(2*np.sum(cost_patch>0))}')
 
             cost_map[mu_y, mu_x] = \
@@ -450,7 +454,7 @@ class CameraLidarCalibrator:
 
             # Visualize current projection
             if self.visualize:
-                self.pc_to_pixels()
+                self.project_point_cloud()
                 proj_img = self.draw_points()
                 cv.imshow('PC Projection', proj_img)
                 cv.waitKey(0)

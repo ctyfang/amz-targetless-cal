@@ -15,7 +15,6 @@ class ImgEdgeDetector:
 
         # TODO: handle multiple images
         self.img_h, self.img_w = self.imgs.shape[:2]
-        self.img_detect(visualize=visualize)
 
     def img_detect(self, visualize=False):
         '''

@@ -3,3 +3,5 @@ generated/*
 __pycache__
 .vscode
 .*
+output/
+**.npy

@@ -26,7 +26,7 @@ def command_line_parser():
         help='Min number of nearest neighbors used')
 
     parser.add_argument(
-        '--pc_ed_score_thr', type=float, default=0.5,
+        '--pc_ed_score_thr', type=float, default=0.35,
         help='Threshold above which points are considered edge points')
 
     # For ImgEdgeDetector
