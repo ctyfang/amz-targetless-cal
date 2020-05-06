@@ -188,11 +188,27 @@ class CameraLidarCalibrator:
         print(f"Brute Force cost computation time:{time.time() - start_t}")
         return cost
 
+    @staticmethod
+    def gaussian_pdf(u, v, sigma, mu=0):
+        """Compute P(d) according to the 1d gaussian pdf"""
+        d = np.sqrt(u**2 + v**2)
+        return (1/(sigma*np.sqrt(2*np.pi)))*np.exp(-(d**2)/(2*(sigma**2)))
+
+    @staticmethod
+    def gaussian_pdf_deriv(u, v, sigma, mu=0, wrt='u'):
+        d = np.sqrt(u ** 2 + v ** 2)
+        if wrt == 'u':
+            factor = u
+        else:
+            factor = v
+        return (1/(sigma*np.sqrt(2*np.pi)))*np.exp(-(d**2)/(2*(sigma**2)))*(-factor/sigma)
+
     def compute_gradient(self, sigma_in):
+        """Assuming lidar edge points have already been projected, compute gradient at current tau"""
+        print('Computing Gradient')
 
         # GMM Cost
         gradient = np.zeros(6)
-
         omega = self.tau[:3]
         jac = jacobian(omega)
 
@@ -214,7 +230,7 @@ class CameraLidarCalibrator:
 
             # check if pixel lands within image bounds
             if self.pixels_mask[pt_idx]:
-
+                start_time = time.time()
                 # lidar edge weight
                 w_i = self.pc_detector.pcs_edge_scores[pt_idx]
 
@@ -238,20 +254,28 @@ class CameraLidarCalibrator:
 
                         # check if current img pixel is an edge pixel
                         if self.img_detector.imgs_edges[y, x]:
+
                             w_j = self.img_detector.imgs_edge_scores[y, x]
                             w_ij = 0.5 * (w_i + w_j) / num_ed_pixels
 
                             M = - \
                                 np.dot(
-                                    skew(R*self.pc_detector.pcs[pt_idx]), jac)
-                            dxc_dtau = np.append(M[0, :], [1, 0, 0])
-                            dyc_dtau = np.append(M[1, :], [0, 1, 0])
-                            dzc_dtau = np.append(M[2, :], [0, 0, 1])
+                                    skew(np.dot(self.R, self.pc_detector.pcs[pt_idx])), jac)
+
+                            dxc_dtau = dyc_dtau = dzc_dtau = np.zeros((1, 6))
+                            dxc_dtau[0, :3] = M[0, :]
+                            dxc_dtau[0, 3] = 1
+
+                            dyc_dtau[0, :3] = M[1, :]
+                            dyc_dtau[0, 4] = 1
+
+                            dyc_dtau[0, :3] = M[2, :]
+                            dyc_dtau[0, 5] = 1
 
                             # TODO: Correctly derive gaussian derivative wrt u and v
-                            d = np.linalg.norm([x - mu[0], y - mu[1]], 2)
-                            dG_du = dG_dv = norm.pdf(
-                                d, 0, sigma)*(-d)/(sigma**2)
+                            u, v = x - mu[0], y - mu[1]
+                            dG_du = self.gaussian_pdf_deriv(u, v, sigma, wrt='u')
+                            dG_dv = self.gaussian_pdf_deriv(u, v, sigma, wrt='v')
 
                             x_c, y_c, z_c = self.pc_detector.pcs[pt_idx]
                             du_dxc = f_x/z_c
@@ -262,12 +286,14 @@ class CameraLidarCalibrator:
                             dv_dzc = -(f_y*y_c)/(z_c**2)
 
                             du_dtau = (du_dxc * dxc_dtau) + \
-                                (du_dyc * dyc_dtau) + (du_dzc * dzc_dtau)
+                                      (du_dyc * dyc_dtau) + (du_dzc * dzc_dtau)
                             dv_dtau = (dv_dxc * dxc_dtau) + \
-                                (dv_dyc * dyc_dtau) + (dv_dzc * dzc_dtau)
+                                      (dv_dyc * dyc_dtau) + (dv_dzc * dzc_dtau)
 
                             gradient = gradient + \
-                                (dG_du*du_dtau) + (dG_dv*dv_dtau)
+                                       w_ij*((dG_du*du_dtau) + (dG_dv*dv_dtau))
+
+                # print(f"One projected lidar point gradient component time={time.time()-start_time}")
 
         return gradient
 
@@ -278,6 +304,7 @@ class CameraLidarCalibrator:
 
         cost_map = np.zeros(self.img_detector.imgs_edge_scores.shape)
         for idx_pc in range(self.pc_detector.pcs_edge_idxs.shape[0]):
+
             idx = self.pc_detector.pcs_edge_idxs[idx_pc]
 
             # check if projected pixel lands within image bounds
@@ -335,7 +362,7 @@ class CameraLidarCalibrator:
 
         iter = 0
         cost_history = []
-        learning_rate = 1e-3
+        learning_rate = 1e-15
         # TODO: Backtracking line learning rate
 
         while iter < max_iters:
@@ -349,6 +376,9 @@ class CameraLidarCalibrator:
 
             cost = self.compute_conv_cost(sigma_in)
             cost_history.append(cost)
-            self.tau -= learning_rate*self.compute_gradient(sigma_in)
-
+            start_time = time.time()
+            gradient = self.compute_gradient(sigma_in).reshape((6, ))
+            self.tau -= learning_rate*gradient
+            print(f'Gradient time = {time.time()-start_time}')
+            print('hi')
         # TODO: Plot cost over the iterations
