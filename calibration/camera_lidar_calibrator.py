@@ -42,6 +42,8 @@ class CameraLidarCalibrator:
         self.img_detector = ImgEdgeDetector(cfg, visualize=visualize)
         gc.collect()
 
+        self.project_point_cloud()
+
         if visualize:
             self.draw_all_points(self.pc_detector.pcs_edge_scores)
             self.draw_edge_points()
@@ -379,9 +381,8 @@ class CameraLidarCalibrator:
         return gradient
 
     def compute_conv_cost(self, sigma_in):
-        """Project lidar points onto image using current extrinsics, then compute cost"""
+        """Compute cost"""
         start_t = time.time()
-        self.pc_to_pixels()
 
         cost_map = np.zeros(self.img_detector.imgs_edge_scores.shape)
         for idx_pc in range(self.pc_detector.pcs_edge_idxs.shape[0]):
