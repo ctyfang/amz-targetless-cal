@@ -455,9 +455,10 @@ class CameraLidarCalibrator:
             # Visualize current projection
             if self.visualize:
                 self.project_point_cloud()
-                proj_img = self.draw_points()
-                cv.imshow('PC Projection', proj_img)
-                cv.waitKey(0)
+                # proj_img = self.draw_points()
+                # cv.imshow('PC Projection', proj_img)
+                # cv.waitKey(0)
+                self.draw_all_points()
 
             cost = self.compute_conv_cost(sigma_in)
             cost_history.append(cost)

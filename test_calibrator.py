@@ -41,4 +41,4 @@ print('hi')
 # np.save('test/pc_edge_scores.npy', calibrator.pc_detector.pcs_edge_scores)
 # np.save('test/pc_edge_idx.npy', calibrator.pc_detector.pcs_edge_idxs)
 
-# calibrator.optimize(120, max_iters=1)
+calibrator.optimize(120, max_iters=1)
