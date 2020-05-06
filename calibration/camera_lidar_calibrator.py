@@ -47,10 +47,19 @@ class CameraLidarCalibrator:
         r_vec, _ = cv2.Rodrigues(R)
         return np.hstack((r_vec.T, T.T)).reshape(6, )
 
+    @staticmethod
+    def tau_to_transform(tau):
+        R, _ = cv2.Rodrigues(tau[:3])
+        T = tau[3:].reshape((3, 1))
+        return R, T
+
     def pc_to_pixels(self):
         '''
         Generate pixel coordinate for all points
         '''
+        # Compute R and T from current tau
+        self.R, self.T = self.tau_to_transform(self.tau)
+
         one_mat = np.ones((self.pc_detector.pcs.shape[0], 1))
         point_cloud = np.concatenate((self.pc_detector.pcs, one_mat), axis=1)
 
@@ -75,13 +84,13 @@ class CameraLidarCalibrator:
                                        (self.pixels[:, 1] <= self.img_detector.img_h))
         inside_mask = np.logical_and(inside_mask_x, inside_mask_y)
 
-        if self.visualize:
-            blank = np.zeros(
-                (self.img_detector.img_h, self.img_detector.img_w))
-            blank[self.pixels[inside_mask, 1].astype(
-                np.int), self.pixels[inside_mask, 0].astype(np.int)] = 255
-            cv.imshow('Projected Lidar Edges', blank)
-            cv.waitKey(0)
+        # if self.visualize:
+        #     blank = np.zeros(
+        #         (self.img_detector.img_h, self.img_detector.img_w))
+        #     blank[self.pixels[inside_mask, 1].astype(
+        #         np.int), self.pixels[inside_mask, 0].astype(np.int)] = 255
+        #     cv.imshow('Projected Lidar Edges', blank)
+        #     cv.waitKey(0)
 
         self.pixels_mask = inside_mask
 
@@ -263,16 +272,19 @@ class CameraLidarCalibrator:
         return gradient
 
     def compute_conv_cost(self, sigma_in):
+        """Project lidar points onto image using current extrinsics, then compute cost"""
         start_t = time.time()
         self.pc_to_pixels()
+
         cost_map = np.zeros(self.img_detector.imgs_edge_scores.shape)
         for idx_pc in range(self.pc_detector.pcs_edge_idxs.shape[0]):
             idx = self.pc_detector.pcs_edge_idxs[idx_pc]
-            # Project edge point onto image
-            # check if pixel lands within image bounds
+
+            # check if projected pixel lands within image bounds
             if not self.pixels_mask[idx]:
                 continue
 
+            # TODO: Use camera frame pointcloud for sigma scaling
             sigma = int(sigma_in /
                         np.linalg.norm(self.pc_detector.pcs[idx, :], 2))
 
@@ -295,28 +307,34 @@ class CameraLidarCalibrator:
             # BUG: Only the pixels that contain values > 0 in the edge_scores_patch
             # should be added self.pc_detector_pcs_edge_scores[idx] to. The 0 pixels
             # should remain 0
-            edge_scores_patch += self.pc_detector.pcs_edge_scores[idx]
-            # BUG: I think you are dividing two times by two. Here and on line 289.
-            edge_scores_patch /= 2
-            kernal_patch = gauss2d[3 * sigma - top:3 * sigma + bot,
-                                   3 * sigma - left:3 * sigma + right]
-
-            cost_patch = np.multiply(edge_scores_patch, kernal_patch)
-            if cost_patch.all == 0:
+            nonzero_idxs = np.argwhere(edge_scores_patch)
+            if len(nonzero_idxs) == 0:
                 continue
 
+
+            edge_scores_patch[nonzero_idxs[:, 0], nonzero_idxs[:, 1]] += self.pc_detector.pcs_edge_scores[idx]
+
+            kernel_patch = gauss2d[3 * sigma - top:3 * sigma + bot,
+                                   3 * sigma - left:3 * sigma + right]
+
+            cost_patch = np.multiply(edge_scores_patch, kernel_patch)
+
+            # Normalize by number of edge pixels in the neighborhood
             # print(f'Cost: {np.sum(cost_patch)/(2*np.sum(cost_patch>0))}')
+
             cost_map[mu_y, mu_x] = \
-                np.sum(cost_patch) / (2 * np.sum(cost_patch > 0))
+                np.sum(cost_patch) / (2 * np.sum(edge_scores_patch > 0))
 
         # plot_2d(cost_map)
         gc.collect()
         print(f"Convolution Cost Computation time:{time.time() - start_t}")
+
         return np.sum(cost_map)
 
     def optimize(self, sigma_in, max_iters=10):
 
         iter = 0
+        cost_history = []
         learning_rate = 1e-3
         # TODO: Backtracking line learning rate
 
@@ -329,7 +347,8 @@ class CameraLidarCalibrator:
                 cv.imshow('PC Projection', proj_img)
                 cv.waitKey(0)
 
-            curr_cost = self.compute_conv_cost(sigma_in)
+            cost = self.compute_conv_cost(sigma_in)
+            cost_history.append(cost)
             self.tau -= learning_rate*self.compute_gradient(sigma_in)
 
-        # Plot cost over the iterations
+        # TODO: Plot cost over the iterations
