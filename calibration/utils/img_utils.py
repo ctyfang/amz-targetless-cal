@@ -16,7 +16,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import BoundaryNorm
 from matplotlib.ticker import MaxNLocator
-from scipy.ndimage.filters import gaussian_filter,convolve
+from scipy.ndimage.filters import gaussian_filter, convolve
 
 # Path
 # ptCloud_dir = "data/2011_09_26/sync/velodyne_points/data/"
@@ -82,7 +82,7 @@ class PtCloud():
                 if ((int(pixel[0] + y[i, j]) < 0) |
                     (int(pixel[1] + x[i, j]) < 0) |
                     (int(pixel[0] + y[i, j]) >= self.cost.shape[1]) |
-                    (int(pixel[1] + x[i, j]) >= self.cost.shape[0])):
+                        (int(pixel[1] + x[i, j]) >= self.cost.shape[0])):
                     continue
                 self.cost[int(pixel[1]+x[i, j]), int(pixel[0]+y[i, j])] += \
                     int(255 * gaussian[i, j])
@@ -108,8 +108,8 @@ class PtCloud():
         blurred = gaussian_filter(gray, sigma=2, order=0, mode='reflect')
 
         ###### Gradients x and y (Sobel filters) ######
-        im_x = convolve(blurred, [[-1,0,1],[-2,0,2],[-1,0,1]]) 
-        im_y = convolve(blurred, [[1,2,1],[0,0,0],[-1,-2,-1]])
+        im_x = convolve(blurred, [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]])
+        im_y = convolve(blurred, [[1, 2, 1], [0, 0, 0], [-1, -2, -1]])
 
         ###### gradient and direction ########
         gradient = np.sqrt(np.power(im_x, 2.0) + np.power(im_y, 2.0))
@@ -220,7 +220,7 @@ class PtCloud():
                 continue
             if ((self.pixels[0, i] < 0) | (self.pixels[1, i] < 0) |
                 (self.pixels[0, i] > hsv_image.shape[1]) |
-                (self.pixels[1, i] > hsv_image.shape[0])):
+                    (self.pixels[1, i] > hsv_image.shape[0])):
                 continue
             cv2.circle(
                 hsv_image,
@@ -232,6 +232,7 @@ class PtCloud():
                 show=False)
 
         return cv2.cvtColor(hsv_image, cv2.COLOR_HSV2BGR)
+
 
 def get_boundry(image, center, sigma):
     top = min(3 * sigma, center[0])
@@ -250,10 +251,10 @@ def plot_2d(values):
     norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
     fig, ax0 = plt.subplots(nrows=1)
     plot = ax0.pcolormesh(x,
-                        y,
-                        values[::-1, :],
-                        cmap=cmap,
-                        norm=norm)
+                          y,
+                          values[::-1, :],
+                          cmap=cmap,
+                          norm=norm)
     fig.colorbar(plot, ax=ax0)
     ax0.set_title('pcolormesh with levels')
     plt.axis('equal')
@@ -262,10 +263,13 @@ def plot_2d(values):
 
 def getGaussianKernel2D(sigma, visualize=False):
     x, y = np.meshgrid(np.linspace(-3 * sigma, 3 * sigma, 6 * sigma + 1),
-                        np.linspace(-3 * sigma, 3 * sigma, 6 * sigma + 1))
+                       np.linspace(-3 * sigma, 3 * sigma, 6 * sigma + 1))
     dist = np.sqrt(x * x + y * y)
+    # BUG: Square root over 2 * np.pi missing
     gaussian = np.exp(-(dist**2 / (2.0 * sigma**2))) / (sigma*2 * np.pi)
     gaussian[dist > 3*sigma] = 0
+    # BUG: I am not sure but I don't get why it's necessesary to make the
+    # values in the grid add to one? Carter doesn't go it either.
     gaussian = gaussian / np.sum(gaussian)
     if visualize:
         levels = MaxNLocator(nbins=15).tick_values(0, np.amax(gaussian))
@@ -274,10 +278,10 @@ def getGaussianKernel2D(sigma, visualize=False):
 
         fig, ax0 = plt.subplots(nrows=1)
         plot = ax0.pcolormesh(x,
-                            y,
-                            gaussian[::-1, :],
-                            cmap=cmap,
-                            norm=norm)
+                              y,
+                              gaussian[::-1, :],
+                              cmap=cmap,
+                              norm=norm)
         fig.colorbar(plot, ax=ax0)
         ax0.set_title('pcolormesh with levels')
         plt.axis('equal')
