@@ -160,10 +160,11 @@ def jacobian(omega):
     """Given rotation vector compute Jacobian (3x3). ith column represents derivative of camera frame
        position wrt rotation vector"""
 
-    a = (omega/np.linalg.norm(omega, 2)).reshape((3, 1))
     omega_mag = np.linalg.norm(omega, 2)
+    a = (omega/omega_mag).reshape((3, 1))
+
 
     jac = (np.sin(omega_mag)/omega_mag)*np.eye(3) + (1-np.sin(omega_mag)/omega_mag)*np.dot(a, a.T) + \
-          ((1-np.cos(omega_mag))/omega)*skew(a)
+          ((1-np.cos(omega_mag))/omega_mag)*skew(a)
 
     return jac

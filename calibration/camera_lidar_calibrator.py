@@ -285,7 +285,8 @@ class CameraLidarCalibrator:
         return (1/(sigma*np.sqrt(2*np.pi)))*np.exp(-(d**2)/(2*(sigma**2)))*(-factor/sigma)
 
     def compute_gradient(self, sigma_in):
-        """Assuming lidar edge points have already been projected, compute gradient at current tau"""
+        """Assuming lidar edge points have already been projected, compute gradient at current tau
+           Also assumes tau has already been converted to rot mat and trans vec."""
         print('Computing Gradient')
 
         # GMM Cost
@@ -294,16 +295,8 @@ class CameraLidarCalibrator:
         jac = jacobian(omega)
 
         # TODO: Simplify
-        angle = np.linalg.norm(omega, 2)
-        axis = omega/angle
-        quat = pyquat.Quaternion(axis=axis, radians=angle)
-        R = quat.rotation_matrix
-
-        # TODO: Simplify
         f_x = self.K[0, 0]
         f_y = self.K[1, 1]
-        c_x = self.K[0, 2]
-        c_y = self.K[1, 2]
 
         # iterate over lidar edge points
         for idx in range(self.pc_detector.pcs_edge_idxs.shape[0]):
@@ -311,22 +304,20 @@ class CameraLidarCalibrator:
 
             # check if projected point lands within image bounds
             if self.projection_mask[pt_idx]:
-                start_time = time.time()
                 # lidar edge weight
                 w_i = self.pc_detector.pcs_edge_scores[pt_idx]
 
                 # gaussian parameters
                 mu = self.projected_points[pt_idx, :]
                 sigma = sigma_in / np.linalg.norm(self.pc_detector.pcs[pt_idx, :])
-                cov_mat = np.diag([sigma, sigma])
 
                 # neighborhood params
                 min_x = max(0, int(mu[0] - 3 * sigma))
                 max_x = min(self.img_detector.img_w, int(mu[0] + 3 * sigma))
                 min_y = max(0, int(mu[1] - 3 * sigma))
                 max_y = min(self.img_detector.img_h, int(mu[1] + 3 * sigma))
-                num_ed_projected_points = np.sum(
-                    self.img_detector.imgs_edges[min_y: max_y, min_x: max_x])
+                num_ed_projected_points = np.sum(self.img_detector.imgs_edges[min_y: max_y,
+                                                                              min_x: max_x])
 
                 # iterate over 3-sigma neighborhood
                 for x in range(min_x, max_x):
@@ -354,12 +345,12 @@ class CameraLidarCalibrator:
                             dG_du = self.gaussian_pdf_deriv(u, v, sigma, wrt='u')
                             dG_dv = self.gaussian_pdf_deriv(u, v, sigma, wrt='v')
 
-                            x_c, y_c, z_c = self.pc_detector.pcs[pt_idx]
+                            x_c, y_c, z_c = self.points_cam_frame[pt_idx, :]
                             du_dxc = f_x/z_c
                             du_dyc = 0
                             du_dzc = -(f_x*x_c)/(z_c**2)
                             dv_dxc = 0
-                            dv_dyc = f_y / z_c
+                            dv_dyc = f_y/z_c
                             dv_dzc = -(f_y*y_c)/(z_c**2)
 
                             du_dtau = (du_dxc * dxc_dtau) + (du_dyc * dyc_dtau) + \
@@ -370,9 +361,7 @@ class CameraLidarCalibrator:
                             gradient = gradient + \
                                        w_ij*((dG_du*du_dtau) + (dG_dv*dv_dtau))
 
-                # print(f"One projected lidar point gradient component time={time.time()-start_time}")
-
-        return gradient
+        return (-gradient)
 
     def compute_conv_cost(self, sigma_in):
         """Compute cost"""
@@ -427,28 +416,36 @@ class CameraLidarCalibrator:
         gc.collect()
         print(f"Convolution Cost Computation time:{time.time() - start_t}")
 
-        return np.sum(cost_map)
+        return -np.sum(cost_map)
 
-    def optimize(self, sigma_in, max_iters=10):
-
+    def optimize(self, sigma_in, max_iters=100):
+        max_iters = 100
         iter = 0
         cost_history = []
-        learning_rate = 1e-20
+        learning_rate = 1e-10
         # TODO: Backtracking line learning rate
 
-        while iter < max_iters:
+        while iter <= max_iters:
+            # Project pointcloud edge points, generate R and T from tau
+            self.project_point_cloud()
 
             # Visualize current projection
             if self.visualize:
-                self.project_point_cloud()
-                self.draw_all_points()
+                self.draw_edge_points(score=self.pc_detector.pcs_edge_scores,
+                                      image=self.img_detector.imgs_edge_scores)
 
             cost = self.compute_conv_cost(sigma_in)
             cost_history.append(cost)
+            print(cost_history)
+
             start_time = time.time()
             gradient = self.compute_gradient(sigma_in).reshape((6, ))
             self.tau -= learning_rate*gradient
             print(f'Gradient time = {time.time()-start_time}')
-            print('hi')
+
+            iter += 1
+
+        self.draw_edge_points(score=self.pc_detector.pcs_edge_scores,
+                              image=self.img_detector.imgs_edge_scores)
 
         # TODO: Plot cost over the iterations
