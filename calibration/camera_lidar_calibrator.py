@@ -49,7 +49,7 @@ class CameraLidarCalibrator:
         self.pc_detector.pc_detect(cfg.pc_ed_score_thr, cfg.pc_ed_num_nn,
                                    cfg.pc_ed_rad_nn)
         gc.collect()
-        self.img_detector.img_detect()
+        self.img_detector.img_detect(visualize=visualize)
         gc.collect()
 
         if visualize:
@@ -158,6 +158,7 @@ class CameraLidarCalibrator:
         cv.imshow('Projected Edge Points on Image', image)
         cv.waitKey(0)
         cv.destroyAllWindows()
+        return image
 
     def scalar_to_color(self, score=None, min_d=0, max_d=60):
         """
@@ -366,7 +367,7 @@ class CameraLidarCalibrator:
 
     def compute_conv_cost(self, sigma_in):
         """Compute cost"""
-        start_t = time.time()
+        # start_t = time.time()
 
         cost_map = np.zeros(self.img_detector.imgs_edge_scores.shape)
         for idx_pc in range(self.pc_detector.pcs_edge_idxs.shape[0]):
@@ -391,8 +392,10 @@ class CameraLidarCalibrator:
                 self.img_detector.imgs_edge_scores, (mu_y, mu_x), int(sigma))
             # Get image patch inside the kernel
             edge_scores_patch = \
-                self.img_detector.imgs_edge_scores[mu_y - top:mu_y + bot,
-                                                   mu_x - left:mu_x + right].copy()
+                self.img_detector.imgs_edge_scores[
+                    mu_y - top:mu_y + bot,
+                    mu_x - left:mu_x + right
+                ].copy()
 
             # weight = (normalized img score + normalized pc score) / 2
             # weight = weight / |Omega_i|
@@ -400,8 +403,9 @@ class CameraLidarCalibrator:
             nonzero_idxs = np.argwhere(edge_scores_patch)
             if len(nonzero_idxs) == 0:
                 continue
-            edge_scores_patch[nonzero_idxs[:, 0],
-                              nonzero_idxs[:, 1]] += self.pc_detector.pcs_edge_scores[idx]
+
+            edge_scores_patch[edge_scores_patch != 0] += \
+                self.pc_detector.pcs_edge_scores[idx]
 
             kernel_patch = gauss2d[3 * int(sigma) - top:3 * int(sigma) + bot,
                                    3 * int(sigma) - left:3 * int(sigma) + right]
@@ -416,7 +420,7 @@ class CameraLidarCalibrator:
 
         # plot_2d(cost_map)
         gc.collect()
-        print(f"Convolution Cost Computation time:{time.time() - start_t}")
+        # print(f"Convolution Cost Computation time:{time.time() - start_t}")
 
         return -np.sum(cost_map)
 
@@ -458,14 +462,12 @@ class CameraLidarCalibrator:
             calibrator.tau = tau_init
             calibrator.project_point_cloud()
             cost_history.append(calibrator.compute_conv_cost(sigma_in))
+            # print(cost_history[-1])
             return cost_history[-1]
         tau_optimized = minimize(loss, self.tau, method='Nelder-Mead',
                                       args=(self, sigma_in, cost_history))
         plt.plot(range(len(cost_history)), cost_history)
         plt.show()
-
-        self.draw_edge_points(score=self.pc_detector.pcs_edge_scores)#,
-        #                       image=self.img_detector.imgs_edge_scores)
-        # print(tau_optimized)
-        return tau_optimized
+        self.tau = tau_optimized.x
+        return tau_optimized.x
         
