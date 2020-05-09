@@ -3,6 +3,7 @@ import numpy as np
 import cv2 as cv
 import gc
 import pyquaternion as pyquat
+from scipy.optimize import least_squares, minimize
 from scipy.stats import multivariate_normal
 from scipy.linalg import expm
 from scipy.stats import norm
@@ -390,8 +391,9 @@ class CameraLidarCalibrator:
             top, bot, left, right = get_boundry(
                 self.img_detector.imgs_edge_scores, (mu_y, mu_x), int(sigma))
             # Get image patch inside the kernel
-            edge_scores_patch = self.img_detector.imgs_edge_scores[mu_y - top:mu_y + bot,
-                                                                   mu_x - left:mu_x + right]
+            edge_scores_patch = \
+                self.img_detector.imgs_edge_scores[mu_y - top:mu_y + bot,
+                                                   mu_x - left:mu_x + right].copy()
 
             # weight = (normalized img score + normalized pc score) / 2
             # weight = weight / |Omega_i|
@@ -477,7 +479,19 @@ class CameraLidarCalibrator:
                               image=self.img_detector.imgs_edge_scores)
 
         # TODO: Plot cost over the iterations
-        plt.figure()
-        plt.plot(cost_history)
-        plt.title('Cost over time')
+    def ls_optimize(self, sigma_in, method='lm'):
+        cost_history = []
+        def loss(tau_init, calibrator, sigma_in, cost_history):
+            calibrator.tau = tau_init
+            calibrator.project_point_cloud()
+            cost_history.append(calibrator.compute_conv_cost(sigma_in))
+            return cost_history[-1]
+        tau_optimized = minimize(loss, self.tau, method='Nelder-Mead',
+                                      args=(self, sigma_in, cost_history))
+        plt.plot(range(len(cost_history)), cost_history)
         plt.show()
+
+        self.draw_edge_points(score=self.pc_detector.pcs_edge_scores)#,
+        #                       image=self.img_detector.imgs_edge_scores)
+        # print(tau_optimized)
+        return tau_optimized
