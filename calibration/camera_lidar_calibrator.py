@@ -133,7 +133,7 @@ class CameraLidarCalibrator:
         cv.waitKey(0)
         cv.destroyAllWindows()
 
-    def draw_edge_points(self, score=None, image=None):
+    def draw_edge_points(self, score=None, image=None, save=False):
         """
         Draw only edge points within corresponding camera's FoV on image provided.
         """
@@ -155,6 +155,7 @@ class CameraLidarCalibrator:
             image[pixel[1].astype(
                 np.int), pixel[0].astype(np.int), :] = color
 
+        cv.imwrite(time.strftime("%Y%m%d-%H%M%S") + '.jpg', image)
         cv.imshow('Projected Edge Points on Image', image)
         cv.waitKey(0)
         cv.destroyAllWindows()
@@ -268,8 +269,8 @@ class CameraLidarCalibrator:
                             cost += w_ij * \
                                 multivariate_normal.pdf([x, y], mu, cov_mat)
         gc.collect()
-        print(f"Brute Force cost computation time:{time.time() - start_t}")
-        return cost
+        #print(f"Brute Force cost computation time:{time.time() - start_t}")
+        return -cost
 
     @staticmethod
     def gaussian_pdf(u, v, sigma, mu=0):
@@ -289,7 +290,6 @@ class CameraLidarCalibrator:
     def compute_gradient(self, sigma_in):
         """Assuming lidar edge points have already been projected, compute gradient at current tau
            Also assumes tau has already been converted to rot mat and trans vec."""
-        print('Computing Gradient')
 
         # GMM Cost
         gradient = np.zeros(6)
@@ -311,7 +311,8 @@ class CameraLidarCalibrator:
 
                 # gaussian parameters
                 mu = self.projected_points[pt_idx, :]
-                sigma = sigma_in / np.linalg.norm(self.pc_detector.pcs[pt_idx, :])
+                # sigma = sigma_in / np.linalg.norm(self.pc_detector.pcs[pt_idx, :])
+                sigma = sigma_in
 
                 # neighborhood params
                 min_x = max(0, int(mu[0] - 3 * sigma))
@@ -361,9 +362,9 @@ class CameraLidarCalibrator:
                                       (dv_dzc * dzc_dtau)
 
                             gradient = gradient + \
-                                       w_ij*((dG_du*du_dtau) + (dG_dv*dv_dtau))
+                                        w_ij*((dG_du*du_dtau) + (dG_dv*dv_dtau))
 
-        return (-gradient)
+        return -gradient
 
     def compute_conv_cost(self, sigma_in):
         """Compute cost"""
@@ -424,32 +425,59 @@ class CameraLidarCalibrator:
 
         return -np.sum(cost_map)
 
-    def optimize(self, sigma_in, max_iters=100):
-        max_iters = 100
-        iter = 0
+    def optimize(self, sigma_in, max_iters=100, show_every_n=10, verbose=True, convergence_thresh=1e-6):
+        iteration = 0
         cost_history = []
-        learning_rate = 1e-10
+        learning_rate = 7.5e-7
         # TODO: Backtracking line learning rate
 
-        while iter <= max_iters:
+        last_tau = self.tau
+        last_cost = None
+        while iteration <= max_iters:
+            iteration += 1
+
             # Project pointcloud edge points, generate R and T from tau
             self.project_point_cloud()
 
             # Visualize current projection
-            if self.visualize:
+            if self.visualize and (iteration-1 % show_every_n) == 0:
                 self.draw_edge_points(score=self.pc_detector.pcs_edge_scores,
-                                      image=self.img_detector.imgs_edge_scores)
+                                      image=self.img_detector.imgs_edge_scores,
+                                      save=True)
 
-            cost = self.compute_conv_cost(sigma_in)
+            cost = self.compute_bf_cost(sigma_in)
+
+            # Check for overshoot
+            if last_cost is not None and last_cost < cost:
+                if verbose:
+                    print("Overshot minimum, adjusting learning params...")
+
+                self.tau = last_tau
+                sigma_in *= 0.9
+                learning_rate /= 2
+                continue
+
             cost_history.append(cost)
-            print(cost_history)
-
             start_time = time.time()
             gradient = self.compute_gradient(sigma_in).reshape((6, ))
             self.tau -= learning_rate*gradient
-            print(f'Gradient time = {time.time()-start_time}')
 
-            iter += 1
+            if verbose:
+                print(f"----- ITERATION {iteration} -----")
+                print(f"Cost = {cost}")
+                print(f"Gradient Magnitude = {np.linalg.norm(gradient, 2)}")
+                print(f'Gradient time = {time.time()-start_time}')
+                print("---------------------------")
+
+            # Check for convergence
+            if len(cost_history) > 2 and abs(cost - last_cost) < convergence_thresh:
+                if verbose:
+                    print(f"Converged in {iteration} iterations. LR={learning_rate}. Sig={sigma_in}. Cost={cost}")
+                break
+
+            # Store current cost and tau in-case overshoot
+            last_cost = cost
+            last_tau = self.tau
 
         self.draw_edge_points(score=self.pc_detector.pcs_edge_scores,
                               image=self.img_detector.imgs_edge_scores)
