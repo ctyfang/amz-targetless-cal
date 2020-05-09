@@ -3,6 +3,7 @@ import numpy as np
 import cv2 as cv
 import gc
 import pyquaternion as pyquat
+from scipy.optimize import least_squares
 from scipy.stats import multivariate_normal
 from scipy.linalg import expm
 from scipy.stats import norm
@@ -140,7 +141,8 @@ class CameraLidarCalibrator:
         if image is None:
             image = self.img_detector.imgs.copy()
         else:
-            image = (image.copy() * 255).astype(np.uint8)
+            # image = (image.copy() * 255).astype(np.uint8)
+            image = image.copy().astype(np.uint8) * 255
             image = np.dstack((image, image, image))
 
         colors = self.scalar_to_color()
@@ -389,8 +391,9 @@ class CameraLidarCalibrator:
             top, bot, left, right = get_boundry(
                 self.img_detector.imgs_edge_scores, (mu_y, mu_x), int(sigma))
             # Get image patch inside the kernel
-            edge_scores_patch = self.img_detector.imgs_edge_scores[mu_y - top:mu_y + bot,
-                                                                   mu_x - left:mu_x + right]
+            edge_scores_patch = \
+                self.img_detector.imgs_edge_scores[mu_y - top:mu_y + bot,
+                                                   mu_x - left:mu_x + right].copy()
 
             # weight = (normalized img score + normalized pc score) / 2
             # weight = weight / |Omega_i|
@@ -449,3 +452,25 @@ class CameraLidarCalibrator:
                               image=self.img_detector.imgs_edge_scores)
 
         # TODO: Plot cost over the iterations
+
+    def ls_optimize(self, sigma_in, method='lm'):
+        cost_history = []
+        def loss(tau_init, calibrator, sigma_in, cost_history):
+            # calibrator.tau = tau_init
+            print(calibrator.T)
+            calibrator.R, calibrator.T = calibrator.tau_to_transform(tau_init)
+            print(calibrator.T)
+            # sys.exit()
+            cost_history.append(calibrator.compute_conv_cost(sigma_in))
+            print(cost_history[-1])
+            return cost_history[-1]
+        tau_optimized = least_squares(loss, self.tau, method='trf',
+                                      args=(self, sigma_in, cost_history))
+        plt.plot(range(len(cost_history)), cost_history)
+        plt.show()
+
+        self.draw_edge_points(score=self.pc_detector.pcs_edge_scores)#,
+        #                       image=self.img_detector.imgs_edge_scores)
+        print(tau_optimized.cost)
+        return tau_optimized.x
+        
