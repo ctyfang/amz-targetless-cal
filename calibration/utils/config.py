@@ -22,14 +22,21 @@ def command_line_parser():
         help='Radius in which to include neighbors during point cloud edge detection')
 
     parser.add_argument(
-        '--pc_ed_num_nn', type=float, default=100,
+        '--pc_ed_num_nn', type=float, default=30,
         help='Min number of nearest neighbors used')
 
     parser.add_argument(
-        '--pc_ed_score_thr', type=float, default=0.35,
+        '--pc_ed_score_thr', type=float, default=0.7,
         help='Threshold above which points are considered edge points')
 
-    # For ImgEdgeDetector
+    parser.add_argument(
+        '--im_ed_score_thr1', type=float, default=200,
+        help='Lower threshold for Canny')
+
+    parser.add_argument(
+        '--im_ed_score_thr2', type=float, default=300,
+        help='Upper threshold for Canny')
+
     parser.add_argument(
         '--img_dir', type=str, default='',
         help='Path to directory containing the image files')
@@ -40,7 +47,7 @@ def command_line_parser():
         help='Initial guess of the transformation')
 
     parser.add_argument(
-        '--frames', type=json.loads, default='[29]',
+        '--frames', type=json.loads, default='[34]',
         help='Initial guess of the transformation')
 
     parser.add_argument(

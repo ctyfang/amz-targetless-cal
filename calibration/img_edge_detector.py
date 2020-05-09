@@ -13,6 +13,9 @@ class ImgEdgeDetector:
         self.imgs_edge_scores = None
         self.imgs_edges = None
 
+        self.ed_thresh_low = cfg.im_ed_score_thr1
+        self.ed_thresh_high = cfg.im_ed_score_thr2
+
         # TODO: handle multiple images
         self.img_h, self.img_w = self.imgs.shape[:2]
 
@@ -28,7 +31,7 @@ class ImgEdgeDetector:
         gradient_y = convolve(blurred, [[1, 2, 1], [0, 0, 0], [-1, -2, -1]])
         self.imgs_edge_scores = np.sqrt(
             np.power(gradient_x, 2) + np.power(gradient_y, 2))
-        self.imgs_edges = cv.Canny(self.imgs, 60, 120,
+        self.imgs_edges = cv.Canny(self.imgs, self.ed_thresh_low, self.ed_thresh_high,
                                    L2gradient=True).astype(bool)
         self.imgs_edge_scores[~self.imgs_edges] = 0
         self.imgs_edge_scores = \
