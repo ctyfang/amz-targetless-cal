@@ -45,7 +45,8 @@ class CameraLidarCalibrator:
         self.project_point_cloud()
 
         # Detect edges
-        self.pc_detector.pc_detect(cfg.pc_ed_score_thr,
+        self.pc_detector.pc_detect(self.points_cam_frame,
+                                   cfg.pc_ed_score_thr,
                                    cfg.pc_ed_num_nn,
                                    cfg.pc_ed_rad_nn,
                                    visualize=visualize)
@@ -380,7 +381,7 @@ class CameraLidarCalibrator:
                                        (dv_dzc * dzc_dtau))
 
                             gradient = gradient + \
-                                        w_ij*((dG_du*du_dtau) + (dG_dv*dv_dtau))
+                                w_ij*((dG_du*du_dtau) + (dG_dv*dv_dtau))
 
         return -gradient
 
@@ -398,7 +399,8 @@ class CameraLidarCalibrator:
                 continue
 
             # TODO: Use camera frame pointcloud for sigma scaling
-            sigma = (sigma_in / np.linalg.norm(self.pc_detector.pcs[frame][idx, :], 2))
+            sigma = (
+                sigma_in / np.linalg.norm(self.pc_detector.pcs[frame][idx, :], 2))
 
             mu_x, mu_y = self.projected_points[frame][idx].astype(np.int)
             # Get gaussian kernel

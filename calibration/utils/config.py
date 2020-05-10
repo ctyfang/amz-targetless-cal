@@ -26,7 +26,7 @@ def command_line_parser():
         help='Min number of nearest neighbors used')
 
     parser.add_argument(
-        '--pc_ed_score_thr', type=float, default=0.7,
+        '--pc_ed_score_thr', type=float, default=0.3,
         help='Threshold above which points are considered edge points')
 
     parser.add_argument(

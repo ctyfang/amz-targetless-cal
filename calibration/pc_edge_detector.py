@@ -23,7 +23,7 @@ class PcEdgeDetector:
         self.PC_ED_RAD_NN = cfg.pc_ed_rad_nn
         self.PC_ED_NUM_NN = cfg.pc_ed_num_nn
 
-    def pc_detect(self, thresh=0.6, num_nn=100, rad_nn=0.1, visualize=False):
+    def pc_detect(self, pcs_cam_frame, thresh=0.6, num_nn=100, rad_nn=0.1, visualize=False):
         """
         Compute edge scores for pointcloud
         Get edge points via thresholding
@@ -31,7 +31,7 @@ class PcEdgeDetector:
 
         # TODO: Be able to process several point clouds
         # Init outputs
-        for pc in self.pcs:
+        for pc, pc_cam_frame in zip(self.pcs, pcs_cam_frame):
             num_points = pc.shape[0]
             center_scores = np.zeros(num_points)
             planar_scores = np.zeros(num_points)
@@ -76,17 +76,16 @@ class PcEdgeDetector:
 
             # Remove all points with an edge score below the threshold
             self.pcs_edge_masks.append(self.pcs_edge_scores[-1] > thresh)
-            self.pcs_edge_idxs.append(
-                np.squeeze(np.argwhere(self.pcs_edge_masks[-1])))
-            # self.pcs_edge_idxs = np.squeeze(self.pcs_edge_idxs)
-
             # Exclude boundary points in final thresholding
-            # and max score calculation
             pc_boundary_idxs = self.get_first_and_last_channels_idxs(pc)
             self.pcs_edge_masks[-1][pc_boundary_idxs] = False
-            boundary_mask = [(edge_idx not in pc_boundary_idxs)
-                             for edge_idx in self.pcs_edge_idxs[-1]]
-            self.pcs_edge_idxs[-1] = self.pcs_edge_idxs[-1][boundary_mask]
+            # Exclude points that in the camera frame have a euclidean distance greater than a treshold
+            outside_point_idxs = self.get_points_outside_radius(
+                pc_cam_frame, radius=25)
+            self.pcs_edge_masks[-1][outside_point_idxs] = False
+
+            self.pcs_edge_idxs.append(
+                np.squeeze(np.argwhere(self.pcs_edge_masks[-1])))
 
         if visualize:
             self.pc_visualize_edges(self.pcs[-1], self.pcs_edge_idxs[-1],
@@ -137,6 +136,9 @@ class PcEdgeDetector:
 
     @staticmethod
     def get_first_and_last_channels_idxs(pc, ch_to_remove=3, hor_res=0.2):
+        """
+        Returns numpy array of the point indices that are in the first and last channels
+        """
         x = pc[:, 0]
         y = pc[:, 1]
         z = pc[:, 2]
@@ -153,6 +155,18 @@ class PcEdgeDetector:
             (neg_mask_largest_angle, neg_mask_smallest_angle), axis=0)
 
         return np.unique(boundary_idxs)
+
+    @staticmethod
+    def get_points_outside_radius(pc, radius=30):
+        """
+        Return point indices of points outside radius
+        """
+        distance = np.sqrt(
+            np.power(pc[:, 0], 2) +
+            np.power(pc[:, 1], 2) +
+            np.power(pc[:, 2], 2))
+
+        return np.argwhere(distance > radius)
 
     def pc_visualize_edges(self, xyz, edge_idxs, edge_scores):
         v_min = np.min(edge_scores)
