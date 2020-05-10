@@ -10,9 +10,9 @@ import open3d as o3d
 class PcEdgeDetector:
 
     def __init__(self, cfg, visualize=True):
-        self.pcs = self.load_pc(cfg.pc_dir,
-                                cfg.frames,
-                                subsample=cfg.pc_subsample)
+        self.pcs = self.load_pcs(cfg.pc_dir,
+                                 cfg.frames,
+                                 subsample=cfg.pc_subsample)
 
         self.pcs_edge_idxs = []
         self.pcs_edge_masks = []
@@ -35,7 +35,7 @@ class PcEdgeDetector:
             num_points = pc.shape[0]
             center_scores = np.zeros(num_points)
             planar_scores = np.zeros(num_points)
-            pcs_edge_scores = np.zeros(num_points)
+            pc_edge_scores = np.zeros(num_points)
             pcs_nn_sizes = np.zeros(num_points)
 
             start_t = time.time()
@@ -67,9 +67,9 @@ class PcEdgeDetector:
 
             # Combine two edge scores
             # (Global normalization, local neighborhood size normalization)
-            pcs_edge_scores = np.multiply(center_scores, planar_scores)
-            pcs_edge_scores /= np.max(pcs_edge_scores)
-            self.pcs_edge_scores.append(pcs_edge_scores)
+            pc_edge_scores = np.multiply(center_scores, planar_scores)
+            pc_edge_scores /= np.max(pc_edge_scores)
+            self.pcs_edge_scores.append(pc_edge_scores)
             print(np.mean(self.pcs_edge_scores[-1]))
             print(np.std(self.pcs_edge_scores[-1]))
             print(f"Total pc scoring time:{time.time() - start_t}")
@@ -88,16 +88,12 @@ class PcEdgeDetector:
                              for edge_idx in self.pcs_edge_idxs[-1]]
             self.pcs_edge_idxs[-1] = self.pcs_edge_idxs[-1][boundary_mask]
 
-            pc_nonbound_edge_scores = np.delete(self.pcs_edge_scores,
-                                                pc_boundary_idxs,
-                                                axis=0)
-
         if visualize:
             self.pc_visualize_edges(self.pcs[-1], self.pcs_edge_idxs[-1],
                                     self.pcs_edge_scores[-1])
 
     @staticmethod
-    def load_pc(path, frames, subsample=1.0):
+    def load_pcs(path, frames, subsample=1.0):
         pcs = []
         for frame in frames:
             curr_pc = (np.fromfile(str(path) + '/velodyne_points/data/' +
