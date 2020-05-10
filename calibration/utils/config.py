@@ -47,7 +47,7 @@ def command_line_parser():
         help='Initial guess of the transformation')
 
     parser.add_argument(
-        '--frames', type=json.loads, default='[34]',
+        '--frames', type=json.loads, default='[34, 152]',
         help='Initial guess of the transformation')
 
     parser.add_argument(
@@ -55,8 +55,11 @@ def command_line_parser():
         help='Initial guess of the transformation')
 
     parser.add_argument(
-        '--K', type=json.loads, default='[[7.215377e+02, 0.000000e+00, 6.095593e+02], \
-        [0.000000e+00, 7.215377e+02, 1.728540e+02], [0.000000e+00, 0.000000e+00, 1.000000e+00]]',
+        '--K',
+        type=json.loads,
+        default='[[7.215377e+02, 0.000000e+00, 6.095593e+02], \
+                  [0.000000e+00, 7.215377e+02, 1.728540e+02], \
+                  [0.000000e+00, 0.000000e+00, 1.000000e+00]]',
         help='3x3 camera matrix')
 
     parser.add_argument(

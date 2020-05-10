@@ -50,7 +50,6 @@ class CameraLidarCalibrator:
                                    cfg.pc_ed_rad_nn,
                                    visualize=visualize)
         gc.collect()
-        sys.exit()
         self.img_detector.img_detect(visualize=visualize)
         gc.collect()
 
@@ -59,7 +58,8 @@ class CameraLidarCalibrator:
             self.draw_all_points()
             self.draw_edge_points()
             self.draw_edge_points(
-                score=self.pc_detector.pcs_edge_scores, image=self.img_detector.img_edge_scores)
+                score=self.pc_detector.pcs_edge_scores[-1],
+                image=self.img_detector.img_edge_scores[-1])
 
     @staticmethod
     def transform_to_tau(R, T):
@@ -113,19 +113,20 @@ class CameraLidarCalibrator:
             self.projection_mask.append(np.logical_and(
                 inside_mask, in_front_of_camera_mask))
 
-    def draw_all_points(self, score=None, img=None):
+    def draw_all_points(self, score=None, img=None, frame=-1):
         """
         Draw all points within corresponding camera's FoV on image provided.
         """
         if img is None:
-            image = self.img_detector.imgs.copy()
+            image = self.img_detector.imgs[frame].copy()
         else:
             image = img
 
         colors = self.scalar_to_color(score=score)
-        colors_valid = colors[self.projection_mask]
+        colors_valid = colors[self.projection_mask[frame]]
 
-        projected_points_valid = self.projected_points[self.projection_mask]
+        projected_points_valid = self.projected_points[frame][
+            self.projection_mask[frame]]
 
         for pixel, color in zip(projected_points_valid, colors_valid):
             image[pixel[1].astype(
@@ -135,23 +136,27 @@ class CameraLidarCalibrator:
         cv.waitKey(0)
         cv.destroyAllWindows()
 
-    def draw_edge_points(self, score=None, image=None, save=False):
+    def draw_edge_points(self, score=None, image=None, frame=-1, save=False):
         """
         Draw only edge points within corresponding camera's FoV on image provided.
         """
 
         if image is None:
-            image = self.img_detector.imgs.copy()
+            image = self.img_detector.imgs[frame].copy()
         else:
             image = (image.copy() * 255).astype(np.uint8)
             image = np.dstack((image, image, image))
 
-        colors = self.scalar_to_color()
-        colors_valid = colors[np.logical_and(
-            self.projection_mask, self.pc_detector.pcs_edge_masks)]
+        colors = self.scalar_to_color(frame=frame)
+        colors_valid = colors[
+            np.logical_and(self.projection_mask[frame],
+                           self.pc_detector.pcs_edge_masks[frame])
+        ]
 
-        projected_points_valid = self.projected_points[np.logical_and(
-            self.projection_mask, self.pc_detector.pcs_edge_masks)]
+        projected_points_valid = self.projected_points[frame][
+            np.logical_and(self.projection_mask[frame],
+                           self.pc_detector.pcs_edge_masks[frame])
+        ]
 
         for pixel, color in zip(projected_points_valid, colors_valid):
             image[pixel[1].astype(
@@ -163,14 +168,14 @@ class CameraLidarCalibrator:
         cv.destroyAllWindows()
         return image
 
-    def scalar_to_color(self, score=None, min_d=0, max_d=60):
+    def scalar_to_color(self, score=None, min_d=0, max_d=60, frame=-1):
         """
         print Color(HSV's H value) corresponding to score
         """
         if score is None:
-            score = np.sqrt(np.power(self.points_cam_frame[:, 0], 2) +
-                            np.power(self.points_cam_frame[:, 1], 2) +
-                            np.power(self.points_cam_frame[:, 2], 2))
+            score = np.sqrt(np.power(self.points_cam_frame[frame][:, 0], 2) +
+                            np.power(self.points_cam_frame[frame][:, 1], 2) +
+                            np.power(self.points_cam_frame[frame][:, 2], 2))
 
         np.clip(score, 0, max_d, out=score)
         # max distance is 120m but usually not usual
