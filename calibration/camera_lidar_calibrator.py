@@ -57,14 +57,13 @@ class CameraLidarCalibrator:
             # self.draw_all_points(score=self.pc_detector.pcs_edge_scores)
             self.draw_all_points()
             self.draw_edge_points()
-            self.draw_edge_points(
-                score=self.pc_detector.pcs_edge_scores[-1],
-                image=self.img_detector.img_edge_scores[-1])
+            self.draw_edge_points(score=self.pc_detector.pcs_edge_scores[-1],
+                                  image=self.img_detector.img_edge_scores[-1])
 
     @staticmethod
     def transform_to_tau(R, T):
         r_vec, _ = cv2.Rodrigues(R)
-        return np.hstack((r_vec.T, T.T)).reshape(6, )
+        return np.hstack((r_vec.T, T.T)).reshape(6,)
 
     @staticmethod
     def tau_to_transform(tau):
@@ -103,15 +102,17 @@ class CameraLidarCalibrator:
             in_front_of_camera_mask = self.points_cam_frame[-1][:, 2] > 0
 
             # Remove projected points that are outside of the image
-            inside_mask_x = np.logical_and((projected_points.T[:, 0] >= 0),
-                                        (projected_points.T[:, 0] <= self.img_detector.img_w))
-            inside_mask_y = np.logical_and((projected_points.T[:, 1] >= 0),
-                                        (projected_points.T[:, 1] <= self.img_detector.img_h))
+            inside_mask_x = np.logical_and(
+                (projected_points.T[:, 0] >= 0),
+                (projected_points.T[:, 0] <= self.img_detector.img_w))
+            inside_mask_y = np.logical_and(
+                (projected_points.T[:, 1] >= 0),
+                (projected_points.T[:, 1] <= self.img_detector.img_h))
             inside_mask = np.logical_and(inside_mask_x, inside_mask_y)
 
             # Final projection mask
-            self.projection_mask.append(np.logical_and(
-                inside_mask, in_front_of_camera_mask))
+            self.projection_mask.append(
+                np.logical_and(inside_mask, in_front_of_camera_mask))
 
     def draw_all_points(self, score=None, img=None, frame=-1):
         """
@@ -129,8 +130,7 @@ class CameraLidarCalibrator:
             self.projection_mask[frame]]
 
         for pixel, color in zip(projected_points_valid, colors_valid):
-            image[pixel[1].astype(
-                np.int), pixel[0].astype(np.int), :] = color
+            image[pixel[1].astype(np.int), pixel[0].astype(np.int), :] = color
 
         cv.imshow('Projected Point Cloud on Image', image)
         cv.waitKey(0)
@@ -148,21 +148,20 @@ class CameraLidarCalibrator:
             image = np.dstack((image, image, image))
 
         colors = self.scalar_to_color(frame=frame)
-        colors_valid = colors[
-            np.logical_and(self.projection_mask[frame],
-                           self.pc_detector.pcs_edge_masks[frame])
-        ]
+        colors_valid = colors[np.logical_and(
+            self.projection_mask[frame],
+            self.pc_detector.pcs_edge_masks[frame])]
 
-        projected_points_valid = self.projected_points[frame][
-            np.logical_and(self.projection_mask[frame],
-                           self.pc_detector.pcs_edge_masks[frame])
-        ]
+        projected_points_valid = self.projected_points[frame][np.logical_and(
+            self.projection_mask[frame],
+            self.pc_detector.pcs_edge_masks[frame])]
 
         for pixel, color in zip(projected_points_valid, colors_valid):
-            image[pixel[1].astype(
-                np.int), pixel[0].astype(np.int), :] = color
+            image[pixel[1].astype(np.int), pixel[0].astype(np.int), :] = color
 
-        cv.imwrite(time.strftime("%Y%m%d-%H%M%S") + '.jpg', image)
+        if save:
+            cv.imwrite(time.strftime("%Y%m%d-%H%M%S") + '.jpg', image)
+
         cv.imshow('Projected Edge Points on Image', image)
         cv.waitKey(0)
         cv.destroyAllWindows()
@@ -173,9 +172,10 @@ class CameraLidarCalibrator:
         print Color(HSV's H value) corresponding to score
         """
         if score is None:
-            score = np.sqrt(np.power(self.points_cam_frame[frame][:, 0], 2) +
-                            np.power(self.points_cam_frame[frame][:, 1], 2) +
-                            np.power(self.points_cam_frame[frame][:, 2], 2))
+            score = np.sqrt(
+                np.power(self.points_cam_frame[frame][:, 0], 2) +
+                np.power(self.points_cam_frame[frame][:, 1], 2) +
+                np.power(self.points_cam_frame[frame][:, 2], 2))
 
         np.clip(score, 0, max_d, out=score)
         # max distance is 120m but usually not usual
@@ -192,7 +192,7 @@ class CameraLidarCalibrator:
         """
 
         if image is not None:
-            image = np.uint8(np.dstack((image, image, image)))*255
+            image = np.uint8(np.dstack((image, image, image))) * 255
             cv.imshow('Before projection', image)
             cv.waitKey(0)
 
@@ -205,8 +205,8 @@ class CameraLidarCalibrator:
             index = range(self.projected_points.shape[0])
         else:
             index = np.random.choice(self.projected_points.shape[0],
-                                     size=int(
-                                         self.projected_points.shape[0] / 10),
+                                     size=int(self.projected_points.shape[0] /
+                                              10),
                                      replace=False)
         for i in index:
             if pc[i, 0] < 0:
@@ -214,11 +214,9 @@ class CameraLidarCalibrator:
             if self.projection_mask[i] is False:
                 continue
 
-            cv.circle(
-                hsv_image,
-                (np.int32(self.projected_points[i, 0]), np.int32(
-                    self.projected_points[i, 1])), 1,
-                (int(color[i]), 255, 255), -1)
+            cv.circle(hsv_image, (np.int32(self.projected_points[i, 0]),
+                                  np.int32(self.projected_points[i, 1])), 1,
+                      (int(color[i]), 255, 255), -1)
 
         return cv.cvtColor(hsv_image, cv.COLOR_HSV2BGR)
 
@@ -258,12 +256,12 @@ class CameraLidarCalibrator:
                 cov_mat = np.diag([sigma, sigma])
 
                 # neighborhood params
-                min_x = max(0, int(mu[0] - 3*sigma))
-                max_x = min(self.img_detector.img_w, int(mu[0] + 3*sigma))
-                min_y = max(0, int(mu[1] - 3*sigma))
-                max_y = min(self.img_detector.img_h, int(mu[1] + 3*sigma))
+                min_x = max(0, int(mu[0] - 3 * sigma))
+                max_x = min(self.img_detector.img_w, int(mu[0] + 3 * sigma))
+                min_y = max(0, int(mu[1] - 3 * sigma))
+                max_y = min(self.img_detector.img_h, int(mu[1] + 3 * sigma))
                 num_ed_projected_points = np.sum(
-                    self.img_detector.imgs_edges[min_y: max_y, min_x: max_x])
+                    self.img_detector.imgs_edges[min_y:max_y, min_x:max_x])
 
                 # iterate over 3-sigma neighborhood
                 for x in range(min_x, max_x):
@@ -272,7 +270,7 @@ class CameraLidarCalibrator:
                         # check if current img pixel is an edge pixel
                         if self.img_detector.imgs_edges[y, x]:
                             w_j = self.img_detector.img_edge_scores[y, x]
-                            w_ij = 0.5*(w_i + w_j)/num_ed_projected_points
+                            w_ij = 0.5 * (w_i + w_j) / num_ed_projected_points
                             cost += w_ij * \
                                 multivariate_normal.pdf([x, y], mu, cov_mat)
         gc.collect()
@@ -283,16 +281,18 @@ class CameraLidarCalibrator:
     def gaussian_pdf(u, v, sigma, mu=0):
         """Compute P(d) according to the 1d gaussian pdf"""
         d = np.sqrt(u**2 + v**2)
-        return (1/(sigma*np.sqrt(2*np.pi)))*np.exp(-(d**2)/(2*(sigma**2)))
+        return (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp(-(d**2) /
+                                                           (2 * (sigma**2)))
 
     @staticmethod
     def gaussian_pdf_deriv(u, v, sigma, mu=0, wrt='u'):
-        d = np.sqrt(u ** 2 + v ** 2)
+        d = np.sqrt(u**2 + v**2)
         if wrt == 'u':
             factor = u
         else:
             factor = v
-        return (1/(sigma*np.sqrt(2*np.pi)))*np.exp(-(d**2)/(2*(sigma**2)))*(-factor/sigma)
+        return (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp(
+            -(d**2) / (2 * (sigma**2))) * (-factor / sigma)
 
     def compute_gradient(self, sigma_in):
         """Assuming lidar edge points have already been projected, compute gradient at current tau
@@ -326,8 +326,8 @@ class CameraLidarCalibrator:
                 max_x = min(self.img_detector.img_w, int(mu[0] + 3 * sigma))
                 min_y = max(0, int(mu[1] - 3 * sigma))
                 max_y = min(self.img_detector.img_h, int(mu[1] + 3 * sigma))
-                num_ed_projected_points = np.sum(self.img_detector.imgs_edges[
-                    min_y: max_y, min_x: max_x])
+                num_ed_projected_points = np.sum(
+                    self.img_detector.imgs_edges[min_y:max_y, min_x:max_x])
 
                 # iterate over 3-sigma neighborhood
                 for x in range(min_x, max_x):
@@ -339,9 +339,10 @@ class CameraLidarCalibrator:
                             w_j = self.img_detector.img_edge_scores[y, x]
                             w_ij = 0.5 * (w_i + w_j) / num_ed_projected_points
 
-                            M = -np.dot(skew(
-                                np.dot(self.R, self.pc_detector.pcs[pt_idx])),
-                                jac)
+                            M = -np.dot(
+                                skew(
+                                    np.dot(self.R,
+                                           self.pc_detector.pcs[pt_idx])), jac)
 
                             dxc_dtau = dyc_dtau = dzc_dtau = np.zeros((1, 6))
                             dxc_dtau[0, :3] = M[0, :]
@@ -354,59 +355,62 @@ class CameraLidarCalibrator:
                             dyc_dtau[0, 5] = 1
 
                             u, v = abs(x - mu[0]), abs(y - mu[1])
-                            dG_du = self.gaussian_pdf_deriv(
-                                u, v, sigma, wrt='u')
-                            dG_dv = self.gaussian_pdf_deriv(
-                                u, v, sigma, wrt='v')
+                            dG_du = self.gaussian_pdf_deriv(u,
+                                                            v,
+                                                            sigma,
+                                                            wrt='u')
+                            dG_dv = self.gaussian_pdf_deriv(u,
+                                                            v,
+                                                            sigma,
+                                                            wrt='v')
 
                             x_c, y_c, z_c = self.points_cam_frame[pt_idx, :]
-                            du_dxc = f_x/z_c
+                            du_dxc = f_x / z_c
                             du_dyc = 0
-                            du_dzc = -(f_x*x_c)/(z_c**2)
+                            du_dzc = -(f_x * x_c) / (z_c**2)
                             dv_dxc = 0
-                            dv_dyc = f_y/z_c
-                            dv_dzc = -(f_y*y_c)/(z_c**2)
+                            dv_dyc = f_y / z_c
+                            dv_dzc = -(f_y * y_c) / (z_c**2)
 
-                            du_dtau = ((du_dxc * dxc_dtau)
-                                    + (du_dyc * dyc_dtau)
-                                    + (du_dzc * dzc_dtau))
-                            dv_dtau = ((dv_dxc * dxc_dtau)
-                                    + (dv_dyc * dyc_dtau)
-                                    + (dv_dzc * dzc_dtau))
+                            du_dtau = ((du_dxc * dxc_dtau) +
+                                       (du_dyc * dyc_dtau) +
+                                       (du_dzc * dzc_dtau))
+                            dv_dtau = ((dv_dxc * dxc_dtau) +
+                                       (dv_dyc * dyc_dtau) +
+                                       (dv_dzc * dzc_dtau))
 
                             gradient = gradient + \
                                         w_ij*((dG_du*du_dtau) + (dG_dv*dv_dtau))
 
         return -gradient
 
-    def compute_conv_cost(self, sigma_in):
+    def compute_conv_cost(self, sigma_in, frame=-1):
         """Compute cost"""
         # start_t = time.time()
 
-        cost_map = np.zeros(self.img_detector.img_edge_scores.shape)
-        for idx_pc in range(self.pc_detector.pcs_edge_idxs.shape[0]):
+        cost_map = np.zeros(self.img_detector.img_edge_scores[frame].shape)
+        for idx_pc in range(self.pc_detector.pcs_edge_idxs[frame].shape[0]):
 
-            idx = self.pc_detector.pcs_edge_idxs[idx_pc]
+            idx = self.pc_detector.pcs_edge_idxs[frame][idx_pc]
 
             # check if projected projected point lands within image bounds
-            if not self.projection_mask[idx]:
+            if not self.projection_mask[frame][idx]:
                 continue
 
             # TODO: Use camera frame pointcloud for sigma scaling
-            sigma = (sigma_in /
-                     np.linalg.norm(self.pc_detector.pcs[idx, :], 2))
+            sigma = (sigma_in / np.linalg.norm(self.pc_detector.pcs[frame][idx, :], 2))
 
-            mu_x, mu_y = self.projected_points[idx].astype(np.int)
+            mu_x, mu_y = self.projected_points[frame][idx].astype(np.int)
             # Get gaussian kernel
             # Distance > 3 sigma is set to 0
             # and normalized so that the total Kernel = 1
             # BUG: In getGaussianKernel2D
             gauss2d = getGaussianKernel2D(sigma, False)
             top, bot, left, right = get_boundry(
-                self.img_detector.img_edge_scores, (mu_y, mu_x), int(sigma))
+                self.img_detector.img_edge_scores[frame], (mu_y, mu_x), int(sigma))
             # Get image patch inside the kernel
             edge_scores_patch = \
-                self.img_detector.img_edge_scores[
+                self.img_detector.img_edge_scores[frame][
                     mu_y - top:mu_y + bot,
                     mu_x - left:mu_x + right
                 ].copy()
@@ -419,7 +423,7 @@ class CameraLidarCalibrator:
                 continue
 
             edge_scores_patch[edge_scores_patch != 0] += \
-                self.pc_detector.pcs_edge_scores[idx]
+                self.pc_detector.pcs_edge_scores[frame][idx]
 
             kernel_patch = gauss2d[3 * int(sigma) - top:3 * int(sigma) + bot,
                                    3 * int(sigma) - left:3 * int(sigma) + right]
@@ -438,7 +442,12 @@ class CameraLidarCalibrator:
 
         return -np.sum(cost_map)
 
-    def optimize(self, sigma_in, max_iters=100, show_every_n=10, verbose=True, convergence_thresh=1e-6):
+    def optimize(self,
+                 sigma_in,
+                 max_iters=100,
+                 show_every_n=10,
+                 verbose=True,
+                 convergence_thresh=1e-6):
         iteration = 0
         cost_history = []
         learning_rate = 7.5e-7
@@ -453,7 +462,7 @@ class CameraLidarCalibrator:
             self.project_point_cloud()
 
             # Visualize current projection
-            if self.visualize and (iteration-1 % show_every_n) == 0:
+            if self.visualize and (iteration - 1 % show_every_n) == 0:
                 self.draw_edge_points(score=self.pc_detector.pcs_edge_scores,
                                       image=self.img_detector.img_edge_scores,
                                       save=True)
@@ -472,8 +481,8 @@ class CameraLidarCalibrator:
 
             cost_history.append(cost)
             start_time = time.time()
-            gradient = self.compute_gradient(sigma_in).reshape((6, ))
-            self.tau -= learning_rate*gradient
+            gradient = self.compute_gradient(sigma_in).reshape((6,))
+            self.tau -= learning_rate * gradient
 
             if verbose:
                 print(f"----- ITERATION {iteration} -----")
@@ -483,9 +492,12 @@ class CameraLidarCalibrator:
                 print("---------------------------")
 
             # Check for convergence
-            if len(cost_history) > 2 and abs(cost - last_cost) < convergence_thresh:
+            if len(cost_history) > 2 and abs(cost -
+                                             last_cost) < convergence_thresh:
                 if verbose:
-                    print(f"Converged in {iteration} iterations. LR={learning_rate}. Sig={sigma_in}. Cost={cost}")
+                    print(
+                        f"Converged in {iteration} iterations. LR={learning_rate}. Sig={sigma_in}. Cost={cost}"
+                    )
                 break
 
             # Store current cost and tau in-case overshoot
@@ -499,16 +511,19 @@ class CameraLidarCalibrator:
 
     def ls_optimize(self, sigma_in, method='lm'):
         cost_history = []
+
         def loss(tau_init, calibrator, sigma_in, cost_history):
             calibrator.tau = tau_init
             calibrator.project_point_cloud()
             cost_history.append(calibrator.compute_conv_cost(sigma_in))
             # print(cost_history[-1])
             return cost_history[-1]
-        tau_optimized = minimize(loss, self.tau, method='Nelder-Mead',
-                                      args=(self, sigma_in, cost_history))
+
+        tau_optimized = minimize(loss,
+                                 self.tau,
+                                 method='Nelder-Mead',
+                                 args=(self, sigma_in, cost_history))
         plt.plot(range(len(cost_history)), cost_history)
         plt.show()
         self.tau = tau_optimized.x
         return tau_optimized.x
-        

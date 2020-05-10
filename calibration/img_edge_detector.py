@@ -35,11 +35,12 @@ class ImgEdgeDetector:
 
             img_edge_scores = np.sqrt(
                 np.power(gradient_x, 2) + np.power(gradient_y, 2))
-            img_edges = cv.Canny(
-                img, self.ed_thresh_low, self.ed_thresh_high,
-                L2gradient=True).astype(bool)
+            img_edges = cv.Canny(img,
+                                 self.ed_thresh_low,
+                                 self.ed_thresh_high,
+                                 L2gradient=True).astype(bool)
             img_edge_scores[~img_edges] = 0
-            img_edge_scores = img_edge_scores/np.amax(img_edge_scores)
+            img_edge_scores = img_edge_scores / np.amax(img_edge_scores)
             self.img_edge_scores.append(img_edge_scores)
             self.imgs_edges.append(img_edges)
 
@@ -60,10 +61,10 @@ class ImgEdgeDetector:
         for frame in frames:
             fig, (ax0, ax1) = plt.subplots(nrows=2)
             plot = ax0.pcolormesh(im_x,
-                                 im_y,
-                                 self.img_edge_scores[frame][::-1, :],
-                                 cmap=cmap,
-                                 norm=norm)
+                                  im_y,
+                                  self.img_edge_scores[frame][::-1, :],
+                                  cmap=cmap,
+                                  norm=norm)
             fig.colorbar(plot, ax=ax0)
             ax0.set_title('edge scores')
             plt.axis('equal')

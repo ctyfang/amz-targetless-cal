@@ -10,7 +10,8 @@ import open3d as o3d
 class PcEdgeDetector:
 
     def __init__(self, cfg, visualize=True):
-        self.pcs = self.load_pc(cfg.pc_dir, cfg.frames,
+        self.pcs = self.load_pc(cfg.pc_dir,
+                                cfg.frames,
                                 subsample=cfg.pc_subsample)
 
         self.pcs_edge_idxs = []
@@ -47,8 +48,8 @@ class PcEdgeDetector:
                 # remove duplicates
                 neighbor_i2 = list(set(neighbor_i2) - set(neighbor_i1))
                 neighbor_d2 = np.linalg.norm(pc[neighbor_i2, :] - curr_xyz,
-                                            ord=2,
-                                            axis=1)
+                                             ord=2,
+                                             axis=1)
                 neighbor_i = np.append(neighbor_i1, neighbor_i2).astype(np.int)
                 neighbor_d = np.append(neighbor_d1, neighbor_d2)
 
@@ -83,9 +84,8 @@ class PcEdgeDetector:
             # and max score calculation
             pc_boundary_idxs = self.get_first_and_last_channels_idxs(pc)
             self.pcs_edge_masks[-1][pc_boundary_idxs] = False
-            boundary_mask = [
-                (edge_idx not in pc_boundary_idxs) for edge_idx in self.pcs_edge_idxs[-1]
-            ]
+            boundary_mask = [(edge_idx not in pc_boundary_idxs)
+                             for edge_idx in self.pcs_edge_idxs[-1]]
             self.pcs_edge_idxs[-1] = self.pcs_edge_idxs[-1][boundary_mask]
 
             pc_nonbound_edge_scores = np.delete(self.pcs_edge_scores,
@@ -93,8 +93,8 @@ class PcEdgeDetector:
                                                 axis=0)
 
         if visualize:
-            self.pc_visualize_edges(
-                self.pcs[-1], self.pcs_edge_idxs[-1], self.pcs_edge_scores[-1])
+            self.pc_visualize_edges(self.pcs[-1], self.pcs_edge_idxs[-1],
+                                    self.pcs_edge_scores[-1])
 
     @staticmethod
     def load_pc(path, frames, subsample=1.0):
@@ -103,7 +103,7 @@ class PcEdgeDetector:
                              str(frames[0]).zfill(10) + '.bin',
                              dtype=np.float32).reshape(-1, 4)[:, :3]
 
-            return pc[:int(subsample*pc.shape[0]), :]
+            return pc[:int(subsample * pc.shape[0]), :]
 
         else:
             pcs = []
@@ -112,7 +112,7 @@ class PcEdgeDetector:
                                        str(frame).zfill(10) + '.bin',
                                        dtype=np.float32).reshape(-1, 4)[:, :3])
 
-                curr_pc = curr_pc[:int(subsample*curr_pc.shape[0]), :]
+                curr_pc = curr_pc[:int(subsample * curr_pc.shape[0]), :]
                 pcs.append(curr_pc)
             return pcs
 
@@ -123,7 +123,7 @@ class PcEdgeDetector:
         #              distance in the neighborhood, as done in Kang 2019.
 
         centroid = np.mean(nn_xyz, axis=0)
-        norm_dist = np.linalg.norm(center_xyz - centroid)/max_nn_d
+        norm_dist = np.linalg.norm(center_xyz - centroid) / max_nn_d
         return norm_dist
 
     @staticmethod
@@ -143,7 +143,7 @@ class PcEdgeDetector:
 
         # Compute planarity of neighborhood using SVD (Xia & Wang 2017)
         _, eig_vals, _ = np.linalg.svd(s)
-        planarity = 1 - (eig_vals[1] - eig_vals[2])/eig_vals[0]
+        planarity = 1 - (eig_vals[1] - eig_vals[2]) / eig_vals[0]
 
         return planarity
 
@@ -157,10 +157,10 @@ class PcEdgeDetector:
 
         # Find the indices of the 360 / horizontal_resolution smallest/largest polar angles
         size_channel = 3 * int(360 / hor_res)
-        neg_mask_smallest_angle = np.argpartition(
-            polar_angle, size_channel)[:size_channel]
-        neg_mask_largest_angle = np.argpartition(
-            polar_angle, -size_channel)[-size_channel:]
+        neg_mask_smallest_angle = np.argpartition(polar_angle,
+                                                  size_channel)[:size_channel]
+        neg_mask_largest_angle = np.argpartition(polar_angle,
+                                                 -size_channel)[-size_channel:]
         boundary_idxs = np.concatenate(
             (neg_mask_largest_angle, neg_mask_smallest_angle), axis=0)
 
@@ -172,8 +172,10 @@ class PcEdgeDetector:
 
         edge_points = xyz[edge_idxs, :]
         edge_scores = edge_scores[edge_idxs]
-        self.visualize_xyz_scores(
-            edge_points, edge_scores, vmin=v_min, vmax=v_max)
+        self.visualize_xyz_scores(edge_points,
+                                  edge_scores,
+                                  vmin=v_min,
+                                  vmax=v_max)
 
     @staticmethod
     def visualize_xyz_scores(xyz, scores, vmin=None, vmax=None):
@@ -182,8 +184,7 @@ class PcEdgeDetector:
         if vmax is None:
             vmax = np.max(scores)
 
-        norm = matplotlib.colors.Normalize(
-            vmin=vmin, vmax=vmax, clip=True)
+        norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax, clip=True)
         mapper = cm.ScalarMappable(norm=norm, cmap=cm.jet)
         colors = np.asarray(mapper.to_rgba(scores))
 
