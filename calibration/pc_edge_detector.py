@@ -98,23 +98,15 @@ class PcEdgeDetector:
 
     @staticmethod
     def load_pc(path, frames, subsample=1.0):
-        if len(frames) <= 1:
-            pc = np.fromfile(str(path) + '/velodyne_points/data/' +
-                             str(frames[0]).zfill(10) + '.bin',
-                             dtype=np.float32).reshape(-1, 4)[:, :3]
+        pcs = []
+        for frame in frames:
+            curr_pc = (np.fromfile(str(path) + '/velodyne_points/data/' +
+                                   str(frame).zfill(10) + '.bin',
+                                   dtype=np.float32).reshape(-1, 4)[:, :3])
 
-            return pc[:int(subsample * pc.shape[0]), :]
-
-        else:
-            pcs = []
-            for frame in frames:
-                curr_pc = (np.fromfile(str(path) + '/velodyne_points/data/' +
-                                       str(frame).zfill(10) + '.bin',
-                                       dtype=np.float32).reshape(-1, 4)[:, :3])
-
-                curr_pc = curr_pc[:int(subsample * curr_pc.shape[0]), :]
-                pcs.append(curr_pc)
-            return pcs
+            curr_pc = curr_pc[:int(subsample * curr_pc.shape[0]), :]
+            pcs.append(curr_pc)
+        return pcs
 
     @staticmethod
     def compute_centerscore(nn_xyz, center_xyz, max_nn_d):
