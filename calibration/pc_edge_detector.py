@@ -13,11 +13,10 @@ class PcEdgeDetector:
         self.pcs = self.load_pc(cfg.pc_dir, cfg.frames,
                                 subsample=cfg.pc_subsample)
 
-        self.pcs_edge_idxs = None
-        self.pcs_edge_masks = None
-        self.pcs_edge_scores = None
-        self.pcs_max_edge_score = None
-        self.pcs_nn_sizes = None
+        self.pcs_edge_idxs = []
+        self.pcs_edge_masks = []
+        self.pcs_edge_scores = []
+        # self.pcs_nn_sizes = None
 
         self.PC_ED_SCORE_THR = cfg.pc_ed_score_thr
         self.PC_ED_RAD_NN = cfg.pc_ed_rad_nn
@@ -31,68 +30,71 @@ class PcEdgeDetector:
 
         # TODO: Be able to process several point clouds
         # Init outputs
-        num_points = self.pcs.shape[0]
-        center_scores = np.zeros(num_points)
-        planar_scores = np.zeros(num_points)
-        self.pcs_edge_scores = np.zeros(num_points)
-        self.pcs_nn_sizes = np.zeros(num_points)
+        for pc in self.pcs:
+            num_points = pc.shape[0]
+            center_scores = np.zeros(num_points)
+            planar_scores = np.zeros(num_points)
+            pcs_edge_scores = np.zeros(num_points)
+            pcs_nn_sizes = np.zeros(num_points)
 
-        start_t = time.time()
-        kdtree = ckdtree.cKDTree(self.pcs)
-        for point_idx in range(num_points):
-            curr_xyz = self.pcs[point_idx, :]
+            start_t = time.time()
+            kdtree = ckdtree.cKDTree(pc)
+            for point_idx in range(num_points):
+                curr_xyz = pc[point_idx, :]
 
-            neighbor_d1, neighbor_i1 = kdtree.query(curr_xyz, num_nn)
-            neighbor_i2 = kdtree.query_ball_point(curr_xyz, rad_nn)
-            # remove duplicates
-            neighbor_i2 = list(set(neighbor_i2) - set(neighbor_i1))
-            neighbor_d2 = np.linalg.norm(self.pcs[neighbor_i2, :] - curr_xyz,
-                                         ord=2,
-                                         axis=1)
-            neighbor_i = np.append(neighbor_i1, neighbor_i2).astype(np.int)
-            neighbor_d = np.append(neighbor_d1, neighbor_d2)
+                neighbor_d1, neighbor_i1 = kdtree.query(curr_xyz, num_nn)
+                neighbor_i2 = kdtree.query_ball_point(curr_xyz, rad_nn)
+                # remove duplicates
+                neighbor_i2 = list(set(neighbor_i2) - set(neighbor_i1))
+                neighbor_d2 = np.linalg.norm(pc[neighbor_i2, :] - curr_xyz,
+                                            ord=2,
+                                            axis=1)
+                neighbor_i = np.append(neighbor_i1, neighbor_i2).astype(np.int)
+                neighbor_d = np.append(neighbor_d1, neighbor_d2)
 
-            self.pcs_nn_sizes[point_idx] = neighbor_d.shape[0]
-            neighborhood_xyz = self.pcs[neighbor_i.tolist(), :]
+                pcs_nn_sizes[point_idx] = neighbor_d.shape[0]
+                neighborhood_xyz = pc[neighbor_i.tolist(), :]
 
-            center_score = self.compute_centerscore(neighborhood_xyz, curr_xyz,
-                                                    np.max(neighbor_d))
-            planarity_score = self.compute_planarscore(
-                neighborhood_xyz, curr_xyz)
+                center_score = self.compute_centerscore(neighborhood_xyz,
+                                                        curr_xyz,
+                                                        np.max(neighbor_d))
+                planarity_score = self.compute_planarscore(
+                    neighborhood_xyz, curr_xyz)
 
-            center_scores[point_idx] = center_score
-            planar_scores[point_idx] = planarity_score
+                center_scores[point_idx] = center_score
+                planar_scores[point_idx] = planarity_score
 
-        # Combine two edge scores
-        # (Global normalization, local neighborhood size normalization)
-        self.pcs_edge_scores = np.multiply(center_scores, planar_scores)
-        self.pcs_edge_scores /= np.max(self.pcs_edge_scores)
-        print(np.mean(self.pcs_edge_scores))
-        print(np.std(self.pcs_edge_scores))
-        print(f"Total pc scoring time:{time.time() - start_t}")
+            # Combine two edge scores
+            # (Global normalization, local neighborhood size normalization)
+            pcs_edge_scores = np.multiply(center_scores, planar_scores)
+            pcs_edge_scores /= np.max(pcs_edge_scores)
+            self.pcs_edge_scores.append(pcs_edge_scores)
+            print(np.mean(self.pcs_edge_scores[-1]))
+            print(np.std(self.pcs_edge_scores[-1]))
+            print(f"Total pc scoring time:{time.time() - start_t}")
 
-        # Remove all points with an edge score below the threshold
-        self.pcs_edge_masks = self.pcs_edge_scores > thresh
-        self.pcs_edge_idxs = np.argwhere(self.pcs_edge_masks)
-        self.pcs_edge_idxs = np.squeeze(self.pcs_edge_idxs)
+            # Remove all points with an edge score below the threshold
+            self.pcs_edge_masks.append(self.pcs_edge_scores[-1] > thresh)
+            self.pcs_edge_idxs.append(
+                np.squeeze(np.argwhere(self.pcs_edge_masks[-1])))
+            # self.pcs_edge_idxs = np.squeeze(self.pcs_edge_idxs)
 
-        # Exclude boundary points in final thresholding
-        # and max score calculation
-        pc_boundary_idxs = self.get_first_and_last_channels_idxs(self.pcs)
-        self.pcs_edge_masks[pc_boundary_idxs] = False
-        boundary_mask = [
-            (edge_idx not in pc_boundary_idxs) for edge_idx in self.pcs_edge_idxs
-        ]
-        self.pcs_edge_idxs = self.pcs_edge_idxs[boundary_mask]
+            # Exclude boundary points in final thresholding
+            # and max score calculation
+            pc_boundary_idxs = self.get_first_and_last_channels_idxs(pc)
+            self.pcs_edge_masks[-1][pc_boundary_idxs] = False
+            boundary_mask = [
+                (edge_idx not in pc_boundary_idxs) for edge_idx in self.pcs_edge_idxs[-1]
+            ]
+            self.pcs_edge_idxs[-1] = self.pcs_edge_idxs[-1][boundary_mask]
 
-        pc_nonbound_edge_scores = np.delete(self.pcs_edge_scores,
-                                            pc_boundary_idxs,
-                                            axis=0)
-        self.pcs_max_edge_score = np.max(pc_nonbound_edge_scores)
+            pc_nonbound_edge_scores = np.delete(self.pcs_edge_scores,
+                                                pc_boundary_idxs,
+                                                axis=0)
 
         if visualize:
             self.pc_visualize_edges(
-                self.pcs, self.pcs_edge_idxs, self.pcs_edge_scores)
+                self.pcs[-1], self.pcs_edge_idxs[-1], self.pcs_edge_scores[-1])
 
     @staticmethod
     def load_pc(path, frames, subsample=1.0):
