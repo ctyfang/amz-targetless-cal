@@ -7,6 +7,7 @@ import gc
 from scipy.ndimage.filters import gaussian_filter, convolve
 from scipy.optimize import least_squares, minimize
 from scipy.stats import multivariate_normal
+from sklearn.feature_selection import mutual_info_regression
 from scipy.linalg import expm
 from scipy.stats import norm
 
@@ -80,6 +81,8 @@ class CameraLidarCalibrator:
         '''
         # Compute R and T from current tau
         self.R, self.T = self.tau_to_transform(self.tau)
+
+        # Remove previous projection
         self.points_cam_frame = []
         self.projected_points = []
         self.projection_mask = []
@@ -137,6 +140,22 @@ class CameraLidarCalibrator:
             image[pixel[1].astype(np.int), pixel[0].astype(np.int), :] = color
 
         cv.imshow('Projected Point Cloud on Image', image)
+        cv.waitKey(0)
+        cv.destroyAllWindows()
+
+    def draw_reflectance(self, frame=-1):
+        """Given frame, draw reflectance image"""
+        img_h, img_w = self.img_detector.imgs[frame].shape[:2]
+        refl_img = np.zeros((img_h, img_w), dtype=np.float32)
+
+        projected_points_valid = self.projected_points[frame][self.projection_mask[frame]]
+        reflectance_values = self.pc_detector.reflectances[frame][self.projection_mask[frame]]
+
+        for pixel, reflectance in zip(projected_points_valid, reflectance_values):
+            refl_img[pixel[1].astype(np.int), pixel[0].astype(np.int)] = reflectance
+
+        cv.imshow('Projected Point Cloud Reflectance Image', refl_img)
+        cv.imshow('Grayscale img', cv.cvtColor(self.img_detector.imgs[frame], cv.COLOR_BGR2GRAY))
         cv.waitKey(0)
         cv.destroyAllWindows()
 
@@ -516,13 +535,31 @@ class CameraLidarCalibrator:
 
         # TODO: Plot cost over the iterations
 
-    def ls_optimize(self, sigma_in, method='lm'):
+    def compute_mi_cost(self):
+        total_mi_cost = 0
+        for frame in range(len(self.pc_detector.pcs)):
+            grayscale_img = cv.cvtColor(self.img_detector.imgs[frame], cv.COLOR_BGR2GRAY)
+
+            projected_points_valid = self.projected_points[frame][self.projection_mask[frame]]
+            grayscale_vector = grayscale_img[projected_points_valid[:, 1].astype(np.uint),
+                                             projected_points_valid[:, 0].astype(np.uint)]
+            reflectance_vector = self.pc_detector.reflectances[frame][self.projection_mask[frame]]*255.0
+            total_mi_cost += mutual_info_regression(np.expand_dims(grayscale_vector, 1),
+                                                    reflectance_vector)
+        return -total_mi_cost
+
+    def ls_optimize(self, sigma_in, method='lm', alpha_gmm=1, alpha_mi=30):
+        """Optimize cost over all image-scan pairs using mutual info and gmm.
+            Scale the contributions from two loss sources using alphas."""
         cost_history = []
 
         def loss(tau_init, calibrator, sigma_in, cost_history):
             calibrator.tau = tau_init
             calibrator.project_point_cloud()
-            cost_history.append(calibrator.compute_conv_cost(sigma_in))
+
+            cost_gmm = alpha_gmm*calibrator.compute_conv_cost(sigma_in)
+            cost_mi = alpha_mi*calibrator.compute_mi_cost()
+            cost_history.append(cost_gmm + cost_mi)
             # print(cost_history[-1])
             return cost_history[-1]
 
@@ -531,6 +568,7 @@ class CameraLidarCalibrator:
                                  self.tau,
                                  method='Nelder-Mead',
                                  args=(self, sigma_in, cost_history))
+
         print(f"NL optimizer time={time.time()-start}")
         plt.plot(range(len(cost_history)), cost_history)
         plt.show()

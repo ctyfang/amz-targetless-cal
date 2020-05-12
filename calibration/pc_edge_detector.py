@@ -10,9 +10,9 @@ import os
 class PcEdgeDetector:
 
     def __init__(self, cfg, visualize=True):
-        self.pcs = self.load_pcs(cfg.pc_dir,
-                                 cfg.frames,
-                                 subsample=cfg.pc_subsample)
+        self.pcs, self.reflectances = self.load_pcs(cfg.pc_dir,
+                                                    cfg.frames,
+                                                    subsample=cfg.pc_subsample)
 
         self.pcs_edge_idxs = []
         self.pcs_edge_masks = []
@@ -91,14 +91,18 @@ class PcEdgeDetector:
     @staticmethod
     def load_pcs(path, frames, subsample=1.0):
         pcs = []
+        reflectances = []
         for frame in frames:
             curr_pc = (np.fromfile(str(path) + '/velodyne_points/data/' +
                                    str(frame).zfill(10) + '.bin',
-                                   dtype=np.float32).reshape(-1, 4)[:, :3])
+                                   dtype=np.float32).reshape(-1, 4)[:, :])
 
-            curr_pc = curr_pc[:int(subsample * curr_pc.shape[0]), :]
-            pcs.append(curr_pc)
-        return pcs
+            pc = curr_pc[:int(subsample * curr_pc.shape[0]), :3]
+            refl = curr_pc[:int(subsample * curr_pc.shape[0]), 3]
+            pcs.append(pc)
+            reflectances.append(refl)
+
+        return pcs, reflectances
 
     @staticmethod
     def compute_centerscore(nn_xyz, center_xyz, max_nn_d):
@@ -154,7 +158,7 @@ class PcEdgeDetector:
         return np.unique(boundary_idxs)
 
     @staticmethod
-    def get_points_outside_radius(pc, radius=30):
+    def get_points_outside_radius(pc, radius=20):
         """
         Return point indices of points outside radius
         """
