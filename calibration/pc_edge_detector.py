@@ -5,7 +5,7 @@ from time import sleep
 import matplotlib
 from matplotlib import cm as cm
 import open3d as o3d
-
+import os
 
 class PcEdgeDetector:
 
@@ -17,7 +17,6 @@ class PcEdgeDetector:
         self.pcs_edge_idxs = []
         self.pcs_edge_masks = []
         self.pcs_edge_scores = []
-        # self.pcs_nn_sizes = None
 
         self.PC_ED_SCORE_THR = cfg.pc_ed_score_thr
         self.PC_ED_RAD_NN = cfg.pc_ed_rad_nn
@@ -70,8 +69,6 @@ class PcEdgeDetector:
             pc_edge_scores = np.multiply(center_scores, planar_scores)
             pc_edge_scores /= np.max(pc_edge_scores)
             self.pcs_edge_scores.append(pc_edge_scores)
-            print(np.mean(self.pcs_edge_scores[-1]))
-            print(np.std(self.pcs_edge_scores[-1]))
             print(f"Total pc scoring time:{time.time() - start_t}")
 
             # Remove all points with an edge score below the threshold

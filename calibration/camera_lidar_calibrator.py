@@ -80,6 +80,9 @@ class CameraLidarCalibrator:
         '''
         # Compute R and T from current tau
         self.R, self.T = self.tau_to_transform(self.tau)
+        self.points_cam_frame = []
+        self.projected_points = []
+        self.projection_mask = []
 
         for pc in self.pc_detector.pcs:
             one_mat = np.ones((pc.shape[0], 1))
@@ -124,7 +127,7 @@ class CameraLidarCalibrator:
         else:
             image = img
 
-        colors = self.scalar_to_color(score=score)
+        colors = self.scalar_to_color(score=score, frame=frame)
         colors_valid = colors[self.projection_mask[frame]]
 
         projected_points_valid = self.projected_points[frame][
@@ -399,8 +402,9 @@ class CameraLidarCalibrator:
                 continue
 
             # TODO: Use camera frame pointcloud for sigma scaling
-            sigma = (
-                sigma_in / np.linalg.norm(self.pc_detector.pcs[frame][idx, :], 2))
+            #sigma = (
+            #    sigma_in / np.linalg.norm(self.pc_detector.pcs[frame][idx, :], 2))
+            sigma = sigma_in
 
             mu_x, mu_y = self.projected_points[frame][idx].astype(np.int)
             # Get gaussian kernel
@@ -506,6 +510,7 @@ class CameraLidarCalibrator:
             last_cost = cost
             last_tau = self.tau
 
+        self.draw_all_points()
         self.draw_edge_points(score=self.pc_detector.pcs_edge_scores,
                               image=self.img_detector.img_edge_scores)
 
@@ -521,11 +526,14 @@ class CameraLidarCalibrator:
             # print(cost_history[-1])
             return cost_history[-1]
 
+        start = time.time()
         tau_optimized = minimize(loss,
                                  self.tau,
                                  method='Nelder-Mead',
                                  args=(self, sigma_in, cost_history))
+        print(f"NL optimizer time={time.time()-start}")
         plt.plot(range(len(cost_history)), cost_history)
         plt.show()
         self.tau = tau_optimized.x
+
         return tau_optimized.x
