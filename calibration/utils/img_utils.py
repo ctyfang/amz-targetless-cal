@@ -262,15 +262,18 @@ def plot_2d(values):
 
 
 def getGaussianKernel2D(sigma, visualize=False):
-    x, y = np.meshgrid(np.linspace(-3 * sigma, 3 * sigma, 6 * sigma + 1),
-                       np.linspace(-3 * sigma, 3 * sigma, 6 * sigma + 1))
+    """Given sigma, get 2D kernel of dimensions (6*int(sigma), 6*int(sigma))"""
+    sigma_int = int(sigma)
+    x, y = np.meshgrid(np.linspace(-3 * sigma_int, 3 * sigma_int, 6 * sigma_int + 1),
+                       np.linspace(-3 * sigma_int, 3 * sigma_int, 6 * sigma_int + 1))
     dist = np.sqrt(x * x + y * y)
     # BUG: Square root over 2 * np.pi missing
-    gaussian = np.exp(-(dist**2 / (2.0 * sigma**2))) / (sigma*2 * np.pi)
+    gaussian = np.exp(-(dist**2 / (2.0 * sigma**2))) / (sigma*np.sqrt(2 * np.pi))
     gaussian[dist > 3*sigma] = 0
     # BUG: I am not sure but I don't get why it's necessesary to make the
     # values in the grid add to one? Carter doesn't go it either.
-    gaussian = gaussian / np.sum(gaussian)
+    # gaussian = gaussian / np.sum(gaussian)
+
     if visualize:
         levels = MaxNLocator(nbins=15).tick_values(0, np.amax(gaussian))
         cmap = plt.get_cmap('hot')

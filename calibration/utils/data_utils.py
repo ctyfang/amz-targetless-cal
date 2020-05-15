@@ -162,9 +162,31 @@ def jacobian(omega):
 
     omega_mag = np.linalg.norm(omega, 2)
     a = (omega/omega_mag).reshape((3, 1))
-
-
     jac = (np.sin(omega_mag)/omega_mag)*np.eye(3) + (1-np.sin(omega_mag)/omega_mag)*np.dot(a, a.T) + \
           ((1-np.cos(omega_mag))/omega_mag)*skew(a)
-
     return jac
+
+
+def perturb_tau(tau_in, trans_std=0.05, angle_std=2.5):
+    """Given the std deviations for translation and the rotation angle, perturb the axes of translation
+        independently, and the angle assuming axis-angle representation. Axis remains unchanged."""
+
+    # Unpack tau
+    trans_vec = tau_in[3:]
+    rot_vec = tau_in[:3]
+    angle = np.linalg.norm(rot_vec, 2)
+    axis = rot_vec/angle
+
+    # Sample noise
+    x_noise = np.random.normal(0, trans_std)
+    y_noise = np.random.normal(0, trans_std)
+    z_noise = np.random.normal(0, trans_std)
+    angle_noise = np.deg2rad(np.random.normal(0, angle_std))
+
+    # Apply noise
+    trans_vec[0] += x_noise
+    trans_vec[1] += y_noise
+    trans_vec[2] += z_noise
+    angle += angle_noise
+    new_rot_vec = angle*axis
+    return np.asarray([new_rot_vec, trans_vec]).reshape(tau_in.shape)

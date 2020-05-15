@@ -22,11 +22,11 @@ def command_line_parser():
         help='Radius in which to include neighbors during point cloud edge detection')
 
     parser.add_argument(
-        '--pc_ed_num_nn', type=float, default=30,
+        '--pc_ed_num_nn', type=float, default=50,
         help='Min number of nearest neighbors used')
 
     parser.add_argument(
-        '--pc_ed_score_thr', type=float, default=0.7,
+        '--pc_ed_score_thr', type=float, default=0.4,
         help='Threshold above which points are considered edge points')
 
     parser.add_argument(
@@ -47,7 +47,7 @@ def command_line_parser():
         help='Initial guess of the transformation')
 
     parser.add_argument(
-        '--frames', type=json.loads, default='[34, 152]',
+        '--frames', type=json.loads, default='[34, 35]',
         help='Initial guess of the transformation')
 
     parser.add_argument(

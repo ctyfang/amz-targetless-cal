@@ -5,25 +5,24 @@ from time import sleep
 import matplotlib
 from matplotlib import cm as cm
 import open3d as o3d
-
+import os
 
 class PcEdgeDetector:
 
     def __init__(self, cfg, visualize=True):
-        self.pcs = self.load_pc(cfg.pc_dir,
-                                cfg.frames,
-                                subsample=cfg.pc_subsample)
+        self.pcs, self.reflectances = self.load_pcs(cfg.pc_dir,
+                                                    cfg.frames,
+                                                    subsample=cfg.pc_subsample)
 
         self.pcs_edge_idxs = []
         self.pcs_edge_masks = []
         self.pcs_edge_scores = []
-        # self.pcs_nn_sizes = None
 
         self.PC_ED_SCORE_THR = cfg.pc_ed_score_thr
         self.PC_ED_RAD_NN = cfg.pc_ed_rad_nn
         self.PC_ED_NUM_NN = cfg.pc_ed_num_nn
 
-    def pc_detect(self, thresh=0.6, num_nn=100, rad_nn=0.1, visualize=False):
+    def pc_detect(self, pcs_cam_frame, thresh=0.6, num_nn=100, rad_nn=0.1, visualize=False):
         """
         Compute edge scores for pointcloud
         Get edge points via thresholding
@@ -31,11 +30,11 @@ class PcEdgeDetector:
 
         # TODO: Be able to process several point clouds
         # Init outputs
-        for pc in self.pcs:
+        for pc, pc_cam_frame in zip(self.pcs, pcs_cam_frame):
             num_points = pc.shape[0]
             center_scores = np.zeros(num_points)
             planar_scores = np.zeros(num_points)
-            pcs_edge_scores = np.zeros(num_points)
+            pc_edge_scores = np.zeros(num_points)
             pcs_nn_sizes = np.zeros(num_points)
 
             start_t = time.time()
@@ -67,54 +66,43 @@ class PcEdgeDetector:
 
             # Combine two edge scores
             # (Global normalization, local neighborhood size normalization)
-            pcs_edge_scores = np.multiply(center_scores, planar_scores)
-            pcs_edge_scores /= np.max(pcs_edge_scores)
-            self.pcs_edge_scores.append(pcs_edge_scores)
-            print(np.mean(self.pcs_edge_scores[-1]))
-            print(np.std(self.pcs_edge_scores[-1]))
+            pc_edge_scores = np.multiply(center_scores, planar_scores)
+            pc_edge_scores /= np.max(pc_edge_scores)
+            self.pcs_edge_scores.append(pc_edge_scores)
             print(f"Total pc scoring time:{time.time() - start_t}")
 
             # Remove all points with an edge score below the threshold
             self.pcs_edge_masks.append(self.pcs_edge_scores[-1] > thresh)
-            self.pcs_edge_idxs.append(
-                np.squeeze(np.argwhere(self.pcs_edge_masks[-1])))
-            # self.pcs_edge_idxs = np.squeeze(self.pcs_edge_idxs)
-
             # Exclude boundary points in final thresholding
-            # and max score calculation
             pc_boundary_idxs = self.get_first_and_last_channels_idxs(pc)
             self.pcs_edge_masks[-1][pc_boundary_idxs] = False
-            boundary_mask = [(edge_idx not in pc_boundary_idxs)
-                             for edge_idx in self.pcs_edge_idxs[-1]]
-            self.pcs_edge_idxs[-1] = self.pcs_edge_idxs[-1][boundary_mask]
+            # Exclude points that in the camera frame have a euclidean distance greater than a treshold
+            outside_point_idxs = self.get_points_outside_radius(
+                pc_cam_frame, radius=25)
+            self.pcs_edge_masks[-1][outside_point_idxs] = False
 
-            pc_nonbound_edge_scores = np.delete(self.pcs_edge_scores,
-                                                pc_boundary_idxs,
-                                                axis=0)
+            self.pcs_edge_idxs.append(
+                np.squeeze(np.argwhere(self.pcs_edge_masks[-1])))
 
         if visualize:
             self.pc_visualize_edges(self.pcs[-1], self.pcs_edge_idxs[-1],
                                     self.pcs_edge_scores[-1])
 
     @staticmethod
-    def load_pc(path, frames, subsample=1.0):
-        if len(frames) <= 1:
-            pc = np.fromfile(str(path) + '/velodyne_points/data/' +
-                             str(frames[0]).zfill(10) + '.bin',
-                             dtype=np.float32).reshape(-1, 4)[:, :3]
+    def load_pcs(path, frames, subsample=1.0):
+        pcs = []
+        reflectances = []
+        for frame in frames:
+            curr_pc = (np.fromfile(str(path) + '/velodyne_points/data/' +
+                                   str(frame).zfill(10) + '.bin',
+                                   dtype=np.float32).reshape(-1, 4)[:, :])
 
-            return pc[:int(subsample * pc.shape[0]), :]
+            pc = curr_pc[:int(subsample * curr_pc.shape[0]), :3]
+            refl = curr_pc[:int(subsample * curr_pc.shape[0]), 3]
+            pcs.append(pc)
+            reflectances.append(refl)
 
-        else:
-            pcs = []
-            for frame in frames:
-                curr_pc = (np.fromfile(str(path) + '/velodyne_points/data/' +
-                                       str(frame).zfill(10) + '.bin',
-                                       dtype=np.float32).reshape(-1, 4)[:, :3])
-
-                curr_pc = curr_pc[:int(subsample * curr_pc.shape[0]), :]
-                pcs.append(curr_pc)
-            return pcs
+        return pcs, reflectances
 
     @staticmethod
     def compute_centerscore(nn_xyz, center_xyz, max_nn_d):
@@ -149,6 +137,9 @@ class PcEdgeDetector:
 
     @staticmethod
     def get_first_and_last_channels_idxs(pc, ch_to_remove=3, hor_res=0.2):
+        """
+        Returns numpy array of the point indices that are in the first and last channels
+        """
         x = pc[:, 0]
         y = pc[:, 1]
         z = pc[:, 2]
@@ -165,6 +156,18 @@ class PcEdgeDetector:
             (neg_mask_largest_angle, neg_mask_smallest_angle), axis=0)
 
         return np.unique(boundary_idxs)
+
+    @staticmethod
+    def get_points_outside_radius(pc, radius=20):
+        """
+        Return point indices of points outside radius
+        """
+        distance = np.sqrt(
+            np.power(pc[:, 0], 2) +
+            np.power(pc[:, 1], 2) +
+            np.power(pc[:, 2], 2))
+
+        return np.argwhere(distance > radius)
 
     def pc_visualize_edges(self, xyz, edge_idxs, edge_scores):
         v_min = np.min(edge_scores)
