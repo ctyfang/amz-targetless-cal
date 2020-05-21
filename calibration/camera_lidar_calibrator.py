@@ -4,24 +4,29 @@ import numpy as np
 import cv2 as cv
 from pyquaternion import Quaternion
 import gc
+import itertools as iter
 
 from scipy.ndimage.filters import gaussian_filter, convolve
-from scipy.optimize import least_squares, minimize
+from scipy.optimize import least_squares, minimize, root
 from scipy.stats import multivariate_normal
 from sklearn.feature_selection import mutual_info_regression
 from sklearn.metrics import mutual_info_score
 from scipy.linalg import expm
 from scipy.stats import norm
-
 from matplotlib.colors import BoundaryNorm
 from matplotlib.ticker import MaxNLocator
+import scipy.optimize as optimize
+from scipy.stats import gaussian_kde, entropy
+import statsmodels.api as sm
+from KDEpy import FFTKDE, TreeKDE
+from fastkde import fastKDE
+import seaborn as sns
 
 from calibration.img_edge_detector import ImgEdgeDetector
 from calibration.pc_edge_detector import PcEdgeDetector
 from calibration.utils.data_utils import *
 from calibration.utils.img_utils import *
 from calibration.utils.pc_utils import *
-from calibration.loss_functions import *
 
 class CameraLidarCalibrator:
 
@@ -436,13 +441,46 @@ class CameraLidarCalibrator:
         """Compute mutual info cost for one frame"""
         grayscale_img = cv.cvtColor(self.img_detector.imgs[frame], cv.COLOR_BGR2GRAY)
         projected_points_valid = self.projected_points[frame][self.projection_mask[frame]]
-        grayscale_vector = grayscale_img[projected_points_valid[:, 1].astype(np.uint),
-                                         projected_points_valid[:, 0].astype(np.uint)]
-        reflectance_vector = (self.pc_detector.reflectances[frame][self.projection_mask[frame]]*255.0)
+        grayscale_vector = np.expand_dims(grayscale_img[projected_points_valid[:, 1].astype(np.uint),
+                                         projected_points_valid[:, 0].astype(np.uint)], 1)
+        reflectance_vector = np.expand_dims((self.pc_detector.reflectances[frame][self.projection_mask[frame]]*255.0), 1).astype(np.int)
 
         if len(reflectance_vector) > 0 and len(grayscale_vector) > 0:
-            mi_cost = mutual_info_score(grayscale_vector,
-                                        reflectance_vector)
+
+            ## Using scipy
+            # gray_pde = gaussian_kde(grayscale_vector, 'silverman')
+            # gray_probs = gray_pde(range(256))
+            # refl_pde = gaussian_kde(reflectance_vector, 'silverman')
+            # refl_probs = refl_pde(range(256))
+            #
+            joint_data = np.hstack([grayscale_vector, reflectance_vector])
+            # joint_pde = gaussian_kde(joint_data)
+            grid_x, grid_y = np.meshgrid(range(-1, 257), range(-1, 257))
+            grid_data = np.vstack([grid_y.ravel(), grid_x.ravel()])
+            # joint_probs = joint_pde(grid_data)
+
+            # # Using statsmodels
+            # gray_kde = sm.nonparametric.KDEUnivariate(grayscale_vector)
+            # gray_kde.fit(bw="silverman", fft=True)
+            # gray_probs = gray_kde.evaluate(range(256))
+            #
+            # refl_kde = sm.nonparametric.KDEUnivariate(reflectance_vector)
+            # refl_kde.fit(bw="silverman", fft=True)
+            # refl_probs = refl_kde.evaluate(range(256))
+            #
+            # joint_kde = sm.nonparametric.KDEMultivariate([grayscale_vector, reflectance_vector], 'cc')
+            # joint_probs = joint_kde.pdf(grid_data)
+
+            # # Using KDEpy
+            gray_probs = FFTKDE(bw='silverman').fit(grayscale_vector).evaluate(range(-1, 257))
+            refl_probs = FFTKDE(bw='silverman').fit(reflectance_vector).evaluate(range(-1, 257))
+            joint_probs = FFTKDE().fit(joint_data).evaluate(grid_data.T)
+
+            gray_probs /= np.sum(gray_probs)
+            refl_probs /= np.sum(refl_probs)
+            joint_probs /= np.sum(joint_probs)
+            mi_cost = entropy(gray_probs) + entropy(refl_probs) - entropy(joint_probs)
+            mi_cost = max(0, mi_cost)
         else:
             mi_cost = 0
         return -mi_cost
@@ -580,64 +618,132 @@ class CameraLidarCalibrator:
             Scale the contributions from two loss sources using alphas."""
         cost_history = []
         tau_preoptimize = self.tau
-        minimize_options = {'maxiter': maxiter, 'xtol': 1e-8, 'ftol': 1e-10, 'disp': True}
+        minimize_options = {'maxiter': maxiter, 'xtol': 1e-5, 'disp': True, 'adaptive': True}
 
-        def loss_callback(xk):
+        # Store initial tau to mutate if it fails to converge
+        self.tau_preoptimize = self.tau
+
+        # End the optimization with at least as many points on the image
+        self.initial_num_points = 0
+        for frame_idx in range(len(self.projection_mask)):
+            self.initial_num_points += np.sum(self.projection_mask[frame_idx])
+
+        def loss_callback(xk, state=None):
             total_valid_points = 0
             for frame_idx in range(len(self.projection_mask)):
                 total_valid_points += np.sum(self.projection_mask[frame_idx])
 
             if total_valid_points < 1000:
                 raise BadProjection
-            return True
+            return False
 
         optim_successful = False
 
         # Re-try optimization until final projection lands on image
         start = time.time()
         while not optim_successful:
-            self.tau = tau_preoptimize
-
             if translation_only:
                 print('Optimizing over translation...')
                 trans_vec = self.tau[3:]
                 try:
-                    trans_vec_optimized = minimize(loss_translation,
-                                                 trans_vec,
-                                                 method='Nelder-Mead',
-                                                 args=(self, sigma_in, cost_history),
-                                                 options=minimize_options,
-                                                 callback=loss_callback)
+                    bounds = get_trans_bounds(trans_vec, trans_range=0.25)
+                    opt_results = optimize.differential_evolution(loss_translation,
+                                                              bounds,
+                                                              args=(self, sigma_in, alpha_mi, alpha_gmm, cost_history))
+                    # opt_results = minimize(loss_translation,
+                    #                      trans_vec,
+                    #                      method='Nelder-Mead',
+                    #                      jac=None,
+                    #                      args=(self, sigma_in, alpha_mi, alpha_gmm, cost_history),
+                    #                      options=minimize_options,
+                    #                      callback=loss_callback)
 
-                    self.tau[3:] = trans_vec_optimized.x
+                    self.tau[3:] = opt_results.x
                     optim_successful = True
 
                 except BadProjection:
                     print("Bad projection.. perturbed tau, trying again")
-                    tau_preoptimize = perturb_tau(tau_preoptimize, 0.005, 0.001)
+                    self.tau = perturb_tau(self.tau_preoptimize, 0.005, 0.5)
                     cost_history = []
 
             else:
                 print('Optimizing over all extrinsics...')
-                tau_quat = self.tau_to_tauquat(self.tau)
+                tau = self.tau
+                # bounds = get_bounds(tau_quat)
                 try:
-                    tau_optimized = minimize(loss,
-                                             tau_quat,
+                    # opt_results = optimize.differential_evolution(loss,
+                    #                                               bounds,
+                    #                                               args=(self, sigma_in, alpha_mi, alpha_gmm, cost_history)
+                    #                                               )
+                    opt_results = minimize(loss,
+                                             tau,
                                              method='Nelder-Mead',
-                                             args=(self, sigma_in, cost_history),
+                                             jac=None,
+                                             args=(self, sigma_in, alpha_mi, alpha_gmm, cost_history),
                                              options=minimize_options,
                                              callback=loss_callback)
 
-                    self.tau = self.tauquat_to_tau(tau_optimized.x)
+                    self.tau = opt_results.x
                     optim_successful = True
 
                 except BadProjection:
                     print("Bad projection.. trying again")
-                    tau_preoptimize = perturb_tau(tau_preoptimize, 0.005, 0.5)
+                    self.tau = perturb_tau(self.tau_preoptimize, 0.005, 0.5)
                     cost_history = []
 
         print(f"NL optimizer time={time.time()-start}")
-        plt.plot(range(len(cost_history)), cost_history)
-        plt.show()
 
         return self.tau, cost_history
+
+
+def loss(tau, calibrator, sigma_in, alpha_mi, alpha_gmm, cost_history):
+    # calibrator.tau = CameraLidarCalibrator.tauquat_to_tau(tau_quat_init)
+    calibrator.tau = tau
+    calibrator.project_point_cloud()
+    num_frames = len(calibrator.pc_detector.pcs)
+
+    # During the optimization, penalize extrinsics that result in fewer projected LiDAR points
+    # total_points = 0
+    # for frame_idx in range(num_frames):
+    #     total_points += np.sum(calibrator.projection_mask[frame_idx])
+    # if (total_points/calibrator.initial_num_points) < 0.9:
+    #     return 0
+
+    cost_mi = cost_gmm = 0
+    for frame_idx in range(num_frames):
+        cost_mi += alpha_mi*calibrator.compute_mi_cost(frame_idx)
+        cost_gmm += alpha_gmm*calibrator.compute_conv_cost(sigma_in, frame_idx)
+
+    total_cost = (cost_mi/num_frames) + (cost_gmm/num_frames)
+    cost_history.append(total_cost)
+    print([cost_mi, cost_gmm])
+    # print(cost_history[-1])
+    return cost_history[-1]
+
+
+def loss_translation(trans_vec_init, calibrator, sigma_in, alpha_mi, alpha_gmm, cost_history):
+    calibrator.tau[3:] = trans_vec_init
+    calibrator.project_point_cloud()
+    num_frames = len(calibrator.pc_detector.pcs)
+
+    # During the optimization, penalize extrinsics that result in fewer projected LiDAR points
+    # total_points = 0
+    # for frame_idx in range(num_frames):
+    #     total_points += np.sum(calibrator.projection_mask[frame_idx])
+    # if (total_points / calibrator.initial_num_points) < 0.9:
+    #     return 0
+
+    cost_mi = cost_gmm = 0
+    for frame_idx in range(len(calibrator.pc_detector.pcs)):
+        cost_mi += alpha_mi*calibrator.compute_mi_cost(frame_idx)
+        cost_gmm += alpha_gmm*calibrator.compute_conv_cost(sigma_in, frame_idx)
+
+    total_cost = cost_mi + cost_gmm
+    cost_history.append(total_cost)
+    print([cost_mi, cost_gmm])
+    # print(cost_history[-1])
+    return cost_history[-1]
+
+
+class BadProjection(Exception):
+    """Bad Projection exception"""

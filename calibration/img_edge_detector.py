@@ -20,6 +20,9 @@ class ImgEdgeDetector:
 
         # TODO: handle multiple images
         self.img_h, self.img_w = self.imgs[0].shape[:2]
+        for frame_idx in range(len(self.imgs)):
+            curr_h, curr_w = self.imgs[frame_idx].shape[:2]
+            self.img_h, self.img_w = min(self.img_h, curr_h), min(self.img_w, curr_w)
 
     def img_detect(self, visualize=False):
         '''

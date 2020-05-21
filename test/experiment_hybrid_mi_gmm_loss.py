@@ -22,7 +22,7 @@ cfg.img_dir = input_dir
 cfg.calib_dir = calib_dir
 
 # # Load calibrator with detected edges from pickled object
-with open('../output/calibrator.pkl', 'rb') as input_pkl:
+with open('../output/calibrator_collection-3.pkl', 'rb') as input_pkl:
     calibrator = pickle.load(input_pkl)
     calibrator.visualize = True
 
@@ -31,9 +31,10 @@ R, T = load_lid_cal(cfg.calib_dir)
 tau_gt = calibrator.tau = calibrator.transform_to_tau(R, T)
 
 # Experiment Parameters
-exp_params = {'NUM_SAMPLES': 25, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5, 'ALPHA_MI': 2.5, 'ALPHA_GMM': 1,
-              'MAX_ITERS': 500, 'REDUCTION_STAGES': [1.0, 5.0, 10.0, 20.0, 50.0],
-              'SIGMAS': [10.0, 15.0, 10.0, 5.0, 2.5], 'tau_gt': tau_gt.tolist()}
+exp_params = {'NUM_SAMPLES': 5, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
+              'ALPHA_MI': [1], 'ALPHA_GMM': [0.0], 'SIGMAS': [5.0],
+              'MAX_ITERS': 500, 'tau_gt': tau_gt.tolist()}
+
 LOG_DIR = '../output/logs'
 with open(os.path.join(LOG_DIR, 'params.json'), 'w') as json_file:
     json.dump(exp_params, json_file, indent=4)
@@ -60,6 +61,9 @@ for sample_idx in range(exp_params['NUM_SAMPLES']):
     calibrator.tau = perturb_tau(tau_gt,
                                  trans_std=exp_params['TRANS_ERR_SIGMA'],
                                  angle_std=exp_params['ANGLE_ERR_SIGMA'])
+    # calibrator.tau = np.asarray([ 1.1265747,  -1.20870439,  1.30531639, -0.10396132, -0.11517294, -0.24662881])
+    # print('Initial tau')
+    # print(calibrator.tau)
     calibrator.project_point_cloud()
 
     print(tau_gt)
@@ -82,16 +86,16 @@ for sample_idx in range(exp_params['NUM_SAMPLES']):
                                 f'edge_points_{sample_idx}_frame_{frame_idx}.jpg'), img_edges)
 
     # Run optimizer
-    for stage_idx, [stage_factor, sigma_in] in enumerate(zip(exp_params['REDUCTION_STAGES'], exp_params['SIGMAS'])):
+    for stage_idx, [sigma_in, alpha_mi, alpha_gmm] in enumerate(zip(exp_params['SIGMAS'], exp_params['ALPHA_MI'], exp_params['ALPHA_GMM'])):
 
-        print(f'Optimization {stage_idx + 1}/{len(exp_params["REDUCTION_STAGES"])}')
-        if stage_idx <= 1:
-            tau_opt, cost_history = calibrator.ls_optimize(sigma_in, alpha_gmm=exp_params['ALPHA_GMM'],
-                                                           alpha_mi=exp_params['ALPHA_MI']/stage_factor,
+        print(f'Optimization {stage_idx + 1}/{len(exp_params["SIGMAS"])}')
+        if stage_idx != 2:
+            tau_opt, cost_history = calibrator.ls_optimize(sigma_in, alpha_gmm=alpha_gmm,
+                                                           alpha_mi=alpha_mi,
                                                            maxiter=exp_params['MAX_ITERS'], translation_only=False)
         else:
-            tau_opt, cost_history = calibrator.ls_optimize(sigma_in, alpha_gmm=exp_params['ALPHA_GMM'],
-                                                           alpha_mi=exp_params['ALPHA_MI']/stage_factor,
+            tau_opt, cost_history = calibrator.ls_optimize(sigma_in, alpha_gmm=alpha_gmm,
+                                                           alpha_mi=alpha_mi,
                                                            maxiter=exp_params['MAX_ITERS'], translation_only=True)
 
         calibrator.tau = tau_opt

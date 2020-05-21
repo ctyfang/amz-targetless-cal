@@ -264,8 +264,8 @@ def plot_2d(values):
 def getGaussianKernel2D(sigma, visualize=False):
     """Given sigma, get 2D kernel of dimensions (6*int(sigma), 6*int(sigma))"""
     # sigma_int = int(sigma)
-    # x, y = np.meshgrid(np.linspace(-3 * sigma_int, 3 * sigma_int, 6 * sigma_int + 1, dtype=np.float8),
-    #                    np.linspace(-3 * sigma_int, 3 * sigma_int, 6 * sigma_int + 1, dtype=np.float8))
+    # x, y = np.meshgrid(np.linspace(-3 * sigma_int, 3 * sigma_int, 6 * sigma_int + 1),
+    #                    np.linspace(-3 * sigma_int, 3 * sigma_int, 6 * sigma_int + 1))
     # dist = np.sqrt(x * x + y * y)
     # # BUG: Square root over 2 * np.pi missing
     # gaussian = np.exp(-(dist**2 / (2.0 * sigma**2))) / (sigma*np.sqrt(2 * np.pi))
