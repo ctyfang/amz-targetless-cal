@@ -1,9 +1,12 @@
 """Utility functions for working with the KITTI dataset"""
 import numpy as np
+from sklearn.metrics import mutual_info_score
+from pyquaternion import Quaternion
 import cv2
 import os
 import sys
 
+from copy import deepcopy
 
 def load_cam_cal(calib_dir):
     """Get camera matrix for camera 0 given directory with KITTI calibration files"""
@@ -167,26 +170,83 @@ def jacobian(omega):
     return jac
 
 
+def euler_to_quaternion(roll, pitch, yaw):
+    qx = np.sin(roll / 2) * np.cos(pitch / 2) * np.cos(yaw / 2) - np.cos(roll / 2) * np.sin(pitch / 2) * np.sin(yaw / 2)
+    qy = np.cos(roll / 2) * np.sin(pitch / 2) * np.cos(yaw / 2) + np.sin(roll / 2) * np.cos(pitch / 2) * np.sin(yaw / 2)
+    qz = np.cos(roll / 2) * np.cos(pitch / 2) * np.sin(yaw / 2) - np.sin(roll / 2) * np.sin(pitch / 2) * np.cos(yaw / 2)
+    qw = np.cos(roll / 2) * np.cos(pitch / 2) * np.cos(yaw / 2) + np.sin(roll / 2) * np.sin(pitch / 2) * np.sin(yaw / 2)
+
+    return [qw, qx, qy, qz]
+
 def perturb_tau(tau_in, trans_std=0.05, angle_std=2.5):
     """Given the std deviations for translation and the rotation angle, perturb the axes of translation
         independently, and the angle assuming axis-angle representation. Axis remains unchanged."""
 
     # Unpack tau
-    trans_vec = tau_in[3:]
-    rot_vec = tau_in[:3]
+    trans_vec = deepcopy(tau_in[3:])
+    rot_vec = deepcopy(tau_in[:3])
     angle = np.linalg.norm(rot_vec, 2)
     axis = rot_vec/angle
 
     # Sample noise
-    x_noise = np.random.normal(0, trans_std)
-    y_noise = np.random.normal(0, trans_std)
-    z_noise = np.random.normal(0, trans_std)
-    angle_noise = np.deg2rad(np.random.normal(0, angle_std))
+    x_noise = np.random.uniform(-trans_std, trans_std)
+    y_noise = np.random.uniform(-trans_std, trans_std)
+    z_noise = np.random.uniform(-trans_std, trans_std)
+    rot_x_noise = np.deg2rad(np.random.uniform(-angle_std, angle_std))
+    rot_y_noise = np.deg2rad(np.random.uniform(-angle_std, angle_std))
+    rot_z_noise = np.deg2rad(np.random.uniform(-angle_std, angle_std))
+
+    # Add noise by sampling an added noisy rotation
+    R_noise = Quaternion(euler_to_quaternion(rot_x_noise, rot_y_noise, rot_z_noise)).rotation_matrix
+    R_old = Quaternion(axis=axis, angle=angle).rotation_matrix
+    R_new = np.dot(R_noise, R_old)
+    quat_new = Quaternion(matrix=R_new)
+    angle_new = quat_new.angle
+    axis_new = quat_new.axis
+    rot_vec_new = angle_new*axis_new
 
     # Apply noise
-    trans_vec[0] += x_noise
-    trans_vec[1] += y_noise
-    trans_vec[2] += z_noise
-    angle += angle_noise
-    new_rot_vec = angle*axis
-    return np.asarray([new_rot_vec, trans_vec]).reshape(tau_in.shape)
+    trans_vec_new = trans_vec + [x_noise, y_noise, z_noise]
+    # angle += angle_noise
+    # new_rot_vec = angle*axis
+    return np.asarray([rot_vec_new, trans_vec_new]).reshape(tau_in.shape)
+
+
+def calc_MI(x, y, bins):
+    c_xy = np.histogram2d(x, y, bins)[0]
+    mi = mutual_info_score(None, None, contingency=c_xy)
+    return mi
+
+
+def extrinsics_error(tau_true, tau_pred):
+    error_dict = {}
+
+    x_err = abs(tau_true[3] - tau_pred[3])
+    y_err = abs(tau_true[4] - tau_pred[4])
+    z_err = abs(tau_true[5] - tau_pred[5])
+    angle_err = abs(np.linalg.norm(tau_true[:3], 2) - np.linalg.norm(tau_pred[:3], 2))
+    axis_err = np.linalg.norm(tau_true[:3]/np.linalg.norm(tau_true[:3], 2) -
+                              tau_pred[:3]/np.linalg.norm(tau_pred[:3], 2))
+
+    error_dict['x'] = x_err
+    error_dict['y'] = y_err
+    error_dict['z'] = z_err
+    error_dict['axis'] = axis_err
+    error_dict['angle'] = angle_err
+    return error_dict
+
+
+def get_bounds(tau_quat_init, trans_range=0.25):
+    x_bounds = [tau_quat_init[4] - trans_range, tau_quat_init[4] + trans_range]
+    y_bounds = [tau_quat_init[5] - trans_range, tau_quat_init[5] + trans_range]
+    z_bounds = [tau_quat_init[6] - trans_range, tau_quat_init[6] + trans_range]
+
+    return [[-1, 1], [-1, 1], [-1, 1], [-1, 1], x_bounds, y_bounds, z_bounds]
+
+
+def get_trans_bounds(trans_vec, trans_range=0.25):
+    x_bounds = [trans_vec[0] - trans_range, trans_vec[0] + trans_range]
+    y_bounds = [trans_vec[1] - trans_range, trans_vec[1] + trans_range]
+    z_bounds = [trans_vec[2] - trans_range, trans_vec[2] + trans_range]
+
+    return [x_bounds, y_bounds, z_bounds]

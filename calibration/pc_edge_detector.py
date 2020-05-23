@@ -93,9 +93,16 @@ class PcEdgeDetector:
         pcs = []
         reflectances = []
         for frame in frames:
-            curr_pc = (np.fromfile(str(path) + '/velodyne_points/data/' +
-                                   str(frame).zfill(10) + '.bin',
-                                   dtype=np.float32).reshape(-1, 4)[:, :])
+            if os.path.exists(str(path) + '/velodyne_points/data/' + str(frame).zfill(10) + '.bin'):
+                filename = str(path) + '/velodyne_points/data/' + str(frame).zfill(10) + '.bin'
+                curr_pc = (np.fromfile(filename,
+                                       dtype=np.float32).reshape(-1, 4)[:, :])
+            else:
+                filename = str(path) + '/velodyne_points/data/' + str(frame).zfill(10) + '.txt'
+                curr_pc = (np.loadtxt(filename,
+                                       dtype=np.float32).reshape(-1, 4)[:, :])
+
+
 
             pc = curr_pc[:int(subsample * curr_pc.shape[0]), :3]
             refl = curr_pc[:int(subsample * curr_pc.shape[0]), 3]
