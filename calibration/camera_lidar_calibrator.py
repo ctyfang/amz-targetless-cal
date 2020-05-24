@@ -5,6 +5,7 @@ import cv2 as cv
 from pyquaternion import Quaternion
 import gc
 import itertools as iter
+from datetime import datetime
 
 from scipy.ndimage.filters import gaussian_filter, convolve
 from scipy.optimize import least_squares, minimize, root
@@ -19,7 +20,7 @@ import scipy.optimize as optimize
 from scipy.stats import gaussian_kde, entropy
 import statsmodels.api as sm
 from KDEpy import FFTKDE, TreeKDE
-from fastkde import fastKDE
+#from fastkde import fastKDE
 import seaborn as sns
 
 from calibration.img_edge_detector import ImgEdgeDetector
@@ -27,6 +28,7 @@ from calibration.pc_edge_detector import PcEdgeDetector
 from calibration.utils.data_utils import *
 from calibration.utils.img_utils import *
 from calibration.utils.pc_utils import *
+
 
 class CameraLidarCalibrator:
 
@@ -180,14 +182,16 @@ class CameraLidarCalibrator:
         reflectance_values = self.pc_detector.reflectances[frame][self.projection_mask[frame]]
 
         for pixel, reflectance in zip(projected_points_valid, reflectance_values):
-            refl_img[pixel[1].astype(np.int), pixel[0].astype(np.int)] = reflectance
+            refl_img[pixel[1].astype(np.int), pixel[0].astype(
+                np.int)] = reflectance
 
         cv.imshow('Projected Point Cloud Reflectance Image', refl_img)
-        cv.imshow('Grayscale img', cv.cvtColor(self.img_detector.imgs[frame], cv.COLOR_BGR2GRAY))
+        cv.imshow('Grayscale img', cv.cvtColor(
+            self.img_detector.imgs[frame], cv.COLOR_BGR2GRAY))
         cv.waitKey(0)
         cv.destroyAllWindows()
 
-    def draw_edge_points(self, score=None, image=None, frame=-1, save=False, show=False):
+    def draw_edge_points(self, score=None, image=None, append_string='', frame=-1, save=False, show=False):
         """
         Draw only edge points within corresponding camera's FoV on image provided.
         """
@@ -211,7 +215,9 @@ class CameraLidarCalibrator:
             image[pixel[1].astype(np.int), pixel[0].astype(np.int), :] = color
 
         if save:
-            cv.imwrite(time.strftime("%Y%m%d-%H%M%S") + '.jpg', image)
+            now = datetime.now()
+            cv.imwrite(append_string +
+                       now.strftime("%y%m%d-%H%M%S-%f") + '.jpg', image)
 
         if show:
             cv.imshow('Projected Edge Points on Image', image)
@@ -439,15 +445,17 @@ class CameraLidarCalibrator:
 
     def compute_mi_cost(self, frame=-1):
         """Compute mutual info cost for one frame"""
-        grayscale_img = cv.cvtColor(self.img_detector.imgs[frame], cv.COLOR_BGR2GRAY)
+        grayscale_img = cv.cvtColor(
+            self.img_detector.imgs[frame], cv.COLOR_BGR2GRAY)
         projected_points_valid = self.projected_points[frame][self.projection_mask[frame]]
         grayscale_vector = np.expand_dims(grayscale_img[projected_points_valid[:, 1].astype(np.uint),
-                                         projected_points_valid[:, 0].astype(np.uint)], 1)
-        reflectance_vector = np.expand_dims((self.pc_detector.reflectances[frame][self.projection_mask[frame]]*255.0), 1).astype(np.int)
+                                                        projected_points_valid[:, 0].astype(np.uint)], 1)
+        reflectance_vector = np.expand_dims(
+            (self.pc_detector.reflectances[frame][self.projection_mask[frame]]*255.0), 1).astype(np.int)
 
         if len(reflectance_vector) > 0 and len(grayscale_vector) > 0:
 
-            ## Using scipy
+            # Using scipy
             # gray_pde = gaussian_kde(grayscale_vector, 'silverman')
             # gray_probs = gray_pde(range(256))
             # refl_pde = gaussian_kde(reflectance_vector, 'silverman')
@@ -472,14 +480,17 @@ class CameraLidarCalibrator:
             # joint_probs = joint_kde.pdf(grid_data)
 
             # # Using KDEpy
-            gray_probs = FFTKDE(bw='silverman').fit(grayscale_vector).evaluate(range(-1, 257))
-            refl_probs = FFTKDE(bw='silverman').fit(reflectance_vector).evaluate(range(-1, 257))
+            gray_probs = FFTKDE(bw='silverman').fit(
+                grayscale_vector).evaluate(range(-1, 257))
+            refl_probs = FFTKDE(bw='silverman').fit(
+                reflectance_vector).evaluate(range(-1, 257))
             joint_probs = FFTKDE().fit(joint_data).evaluate(grid_data.T)
 
             gray_probs /= np.sum(gray_probs)
             refl_probs /= np.sum(refl_probs)
             joint_probs /= np.sum(joint_probs)
-            mi_cost = entropy(gray_probs) + entropy(refl_probs) - entropy(joint_probs)
+            mi_cost = entropy(gray_probs) + \
+                entropy(refl_probs) - entropy(joint_probs)
             mi_cost = max(0, mi_cost)
         else:
             mi_cost = 0
@@ -499,7 +510,8 @@ class CameraLidarCalibrator:
 
             # TODO: Use camera frame pointcloud for sigma scaling
             if sigma_scaling:
-                sigma = (sigma_in / np.linalg.norm(self.points_cam_frame[frame][idx, :], 2))
+                sigma = (
+                    sigma_in / np.linalg.norm(self.points_cam_frame[frame][idx, :], 2))
             else:
                 sigma = sigma_in
 
@@ -618,7 +630,8 @@ class CameraLidarCalibrator:
             Scale the contributions from two loss sources using alphas."""
         cost_history = []
         tau_preoptimize = self.tau
-        minimize_options = {'maxiter': maxiter, 'xtol': 1e-5, 'disp': True, 'adaptive': True}
+        minimize_options = {'maxiter': maxiter,
+                            'xtol': 1e-5, 'disp': True, 'adaptive': True}
 
         # Store initial tau to mutate if it fails to converge
         self.tau_preoptimize = self.tau
@@ -633,7 +646,7 @@ class CameraLidarCalibrator:
             for frame_idx in range(len(self.projection_mask)):
                 total_valid_points += np.sum(self.projection_mask[frame_idx])
 
-            if total_valid_points < 1000:
+            if total_valid_points < 100000:
                 raise BadProjection
             return False
 
@@ -648,8 +661,8 @@ class CameraLidarCalibrator:
                 try:
                     bounds = get_trans_bounds(trans_vec, trans_range=0.25)
                     opt_results = optimize.differential_evolution(loss_translation,
-                                                              bounds,
-                                                              args=(self, sigma_in, alpha_mi, alpha_gmm, cost_history))
+                                                                  bounds,
+                                                                  args=(self, sigma_in, alpha_mi, alpha_gmm, cost_history))
                     # opt_results = minimize(loss_translation,
                     #                      trans_vec,
                     #                      method='Nelder-Mead',
@@ -676,19 +689,24 @@ class CameraLidarCalibrator:
                     #                                               args=(self, sigma_in, alpha_mi, alpha_gmm, cost_history)
                     #                                               )
                     opt_results = minimize(loss,
-                                             tau,
-                                             method='Nelder-Mead',
-                                             jac=None,
-                                             args=(self, sigma_in, alpha_mi, alpha_gmm, cost_history),
-                                             options=minimize_options,
-                                             callback=loss_callback)
+                                           tau,
+                                           method='Nelder-Mead',
+                                           jac=None,
+                                           args=(self, sigma_in, alpha_mi,
+                                                 alpha_gmm, cost_history),
+                                           options=minimize_options,
+                                           callback=loss_callback)
 
                     self.tau = opt_results.x
+                    print("Optimization successful: {}".format(
+                        opt_results.success))
+                    print("Optimization successful: {}".format(
+                        opt_results.message))
                     optim_successful = True
 
                 except BadProjection:
                     print("Bad projection.. trying again")
-                    self.tau = perturb_tau(self.tau_preoptimize, 0.005, 0.5)
+                    self.tau = perturb_tau(self.tau_preoptimized, 0.005, 0.5)
                     cost_history = []
 
         print(f"NL optimizer time={time.time()-start}")
