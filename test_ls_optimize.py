@@ -7,12 +7,8 @@ import cv2
 import sys
 
 
-input_dir_list = ['/media/carter/Samsung_T5/3dv/2011_09_26/2011_09_26_drive_0106_sync',
-                  '/home/benjin/Development/Data/2011_09_26_drive_0106_sync',
-                  'data/2011_09_26_0017']
-calib_dir_list = ['/media/carter/Samsung_T5/3dv/2011_09_26/calibration',
-                  '/home/benjin/Development/Data/2011_09_26_calib/2011_09_26',
-                  'data']
+input_dir_list = ['data/2011_09_26_0017']
+calib_dir_list = ['data']
 
 cfg = command_line_parser()
 
@@ -22,6 +18,7 @@ calib_dir = getPath(calib_dir_list)
 cfg.pc_dir = input_dir
 cfg.img_dir = input_dir
 cfg.calib_dir = calib_dir
+cfg.frames = [99, 139, 149, 150, 151, 152, 153]
 
 new = False
 if new:
@@ -37,14 +34,18 @@ else:
         calibrator.visualize = True
 
 print('Parameter Sets')
-frame = -1
-initial = calibrator.draw_edge_points(
-    score=calibrator.pc_detector.pcs_edge_scores[frame])#, image=calibrator.img_detector.imgs_edge_scores)
-print('Done Drawing')
 
+print(len(calibrator.img_detector.imgs))
 
-print(calibrator.compute_conv_cost(120, frame=frame))
-sys.exit()
+# frames = range(len(calibrator.img_detector.imgs))
+# for frame in frames:
+#     initial = calibrator.draw_edge_points(
+#         score=calibrator.pc_detector.pcs_edge_scores[frame], frame=frame)#, image=calibrator.img_detector.imgs_edge_scores)
+# print('Done Drawing')
+
+# print(calibrator.compute_conv_cost(120, frame=frame))
+print(calibrator.batch_optimization(120))
+# sys.exit()
 # print(calibrator.compute_bf_cost(120))
 
 print(calibrator.ls_optimize(120))

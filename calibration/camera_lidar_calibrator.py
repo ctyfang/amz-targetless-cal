@@ -710,9 +710,49 @@ class CameraLidarCalibrator:
                     cost_history = []
 
         print(f"NL optimizer time={time.time()-start}")
-
         return self.tau, cost_history
 
+    def batch_optimization(self, sigma_in,
+                           method='lm', alpha_gmm=1, alpha_mi=30):
+        cost_history = []
+
+        def loss(tau_init, calibrator, sigma_in, cost_history):
+            # local_cost = []
+            # calibrator.tau = tau_init
+            # calibrator.project_point_cloud()
+            # # print(len(calibrator.projected_points))
+            # for i in range(len(calibrator.img_detector.imgs)):
+            #     cost_gmm = alpha_gmm*calibrator.compute_conv_cost(sigma_in, frame=i)
+            # # cost_mi = alpha_mi*calibrator.compute_mi_cost()
+            #     local_cost.append(cost_gmm)
+            
+            # cost_history.append(local_cost)
+            cost_history.append(np.random.uniform(-threshold, threshold, (7,)))
+            print((cost_history[-1]))
+            # sys.exit()
+            # print(cost_history[-1])
+            return cost_history[-1]
+
+        start = time.time()
+        threshold = 0.01
+        err = np.random.uniform(-threshold, threshold, (6,))
+        tau_optimized = least_squares(loss,
+                                 self.tau+err,
+                                 method='lm',
+                                 args=(self, sigma_in, cost_history))
+
+        print(f"Batch optimizer time={time.time()-start}")
+        cost_history = np.array(cost_history)
+        print(cost_history.shape)
+
+        fig, ax = plt.subplots(len(self.img_detector.imgs))
+        print(ax)
+        # sys.exit()
+        for i in range(len(ax)):
+            ax[i].plot(range(len(cost_history)), cost_history[:,i])
+        plt.show()
+        self.tau = tau_optimized.x
+        return tau_optimized.x
 
 def loss(tau, calibrator, sigma_in, alpha_mi, alpha_gmm, cost_history):
     # calibrator.tau = CameraLidarCalibrator.tauquat_to_tau(tau_quat_init)
