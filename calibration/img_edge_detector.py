@@ -1,7 +1,9 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import cv2 as cv
-import sys
+
+import os
+from glob import glob
 
 from scipy.ndimage.filters import gaussian_filter, convolve
 from matplotlib.colors import BoundaryNorm
@@ -85,10 +87,15 @@ class ImgEdgeDetector:
 
     @staticmethod
     def load_imgs(path, frames):
+        """Load specified frames given KITTI dataset base-path. If frames=-1, loads all frames"""
         imgs = []
-        for frame in frames:
-            imgs.append(
-                cv.imread(
-                    str(path) + '/image_00/data/' + str(frame).zfill(10) +
-                    '.png'))
+
+        if frames == -1:
+            frame_paths = sorted(glob(os.path.join(path, 'image_00', 'data', '*.png')))
+        else:
+            frame_paths = [os.path.join(path, 'image_00', 'data', str(frame).zfill(10)) for frame in frames]
+
+        for path in frame_paths:
+            imgs.append(cv.imread(path))
+
         return imgs

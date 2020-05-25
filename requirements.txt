@@ -1,6 +1,9 @@
 numpy==1.18.3
 open3d==0.9.0
 opencv-python==4.2.0.34
-matplotlib==3.2.1
+matplotlib
 scipy==1.4.1
-sklearn==0.22.2
+sklearn
+PrettyTable
+pyquaternion
+KDEpy

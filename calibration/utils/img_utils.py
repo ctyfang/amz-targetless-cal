@@ -342,6 +342,58 @@ def get_argument():
     return input_dir, output_dir, calib_dir
 
 
+def scalar_to_color(pc, score=None, min_d=0, max_d=60):
+    """
+    print Color(HSV's H value) corresponding to score
+    """
+    if score is None:
+        score = np.sqrt(
+            np.power(pc[:, 0], 2) +
+            np.power(pc[:, 1], 2) +
+            np.power(pc[:, 2], 2))
+
+    np.clip(score, 0, max_d, out=score)
+    # max distance is 120m but usually not usual
+
+    norm = plt.Normalize()
+    colors = plt.cm.jet(norm(score))
+
+    return (colors[:, :3] * 255).astype(np.uint8)
+
+
+def draw_pc_points(img, pc, R, T, K, score=None, show=False):
+    """
+    Draw all points within corresponding camera's FoV on image provided.
+    Color points according to scoring vector, if none provided, color by distance.
+    Rotation and translation from LiDAR -> Camera required.
+    """
+    new_img = img.copy()
+
+    pc_xformed = np.dot(R, pc.T)
+    pc_xformed += T.reshape((3, 1))
+    pc_projed = np.dot(K, pc_xformed)
+    pc_projed = pc_projed/pc_projed[2, :]
+    pc_pixels = pc_projed.T
+    colors = scalar_to_color(pc_xformed.T, score=score)
+
+    img_h, img_w = new_img.shape[:2]
+    for idx, [pixel, color] in enumerate(zip(pc_pixels, colors)):
+
+        if pc[idx, 0] <= 0:
+            continue
+
+        if 0 <= pixel[1] <= img_h and 0 <= pixel[0] <= img_w:
+            cv2.circle(new_img, (pixel[0].astype(np.int), pixel[1].astype(np.int)), 1, color.tolist(), -1)
+            # new_img[pixel[1].astype(np.int), pixel[0].astype(np.int), :] = color
+
+    if show:
+        cv2.imshow('Projected Point Cloud on Image', new_img)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+    return new_img
+
+
 def main():
     '''
     MAIN() function.
@@ -370,6 +422,23 @@ def main():
         cv2.destroyAllWindows()
         return
 
+    def scalar_to_color(self, score=None, min_d=0, max_d=60, frame=-1):
+        """
+        print Color(HSV's H value) corresponding to score
+        """
+        if score is None:
+            score = np.sqrt(
+                np.power(self.points_cam_frame[frame][:, 0], 2) +
+                np.power(self.points_cam_frame[frame][:, 1], 2) +
+                np.power(self.points_cam_frame[frame][:, 2], 2))
+
+        np.clip(score, 0, max_d, out=score)
+        # max distance is 120m but usually not usual
+
+        norm = plt.Normalize()
+        colors = plt.cm.jet(norm(score))
+
+        return (colors[:, :3] * 255).astype(np.uint8)
 
 if __name__ == '__main__':
     main()

@@ -7,22 +7,24 @@ import pickle
 import json
 from prettytable import PrettyTable
 
-input_dir_list = ['/media/carter/Samsung_T5/3dv/2011_09_28/collection',
-                  '/home/benjin/Development/Data/2011_09_26_drive_0106_sync',
-                  'data/2011_09_26_0017']
+# input_dir_list = ['/media/carter/Samsung_T5/3dv/2011_09_28/collection',
+#                   '/home/benjin/Development/Data/2011_09_26_drive_0106_sync',
+#                   'data/2011_09_26_0017']
 calib_dir_list = ['/media/carter/Samsung_T5/3dv/2011_09_28/calibration',
                   '/home/benjin/Development/Data/2011_09_26_calib/2011_09_26',
-                  'data']
+                  'data',
+                  '/home/carter/pycharm_project_534/data/calibration',
+                  './data/calibration']
 cfg = command_line_parser()
-
-input_dir = getPath(input_dir_list)
+#
+# input_dir = getPath(input_dir_list)
 calib_dir = getPath(calib_dir_list)
-cfg.pc_dir = input_dir
-cfg.img_dir = input_dir
+# cfg.pc_dir = input_dir
+# cfg.img_dir = input_dir
 cfg.calib_dir = calib_dir
 
-# # Load calibrator with detected edges from pickled object
-with open('../output/calibrator_collection-3.pkl', 'rb') as input_pkl:
+# Load calibrator with detected edges from pickled object
+with open('../output/calibrator_collection-8-0928.pkl', 'rb') as input_pkl:
     calibrator = pickle.load(input_pkl)
     calibrator.visualize = True
 
@@ -31,11 +33,23 @@ R, T = load_lid_cal(cfg.calib_dir)
 tau_gt = calibrator.tau = calibrator.transform_to_tau(R, T)
 
 # Experiment Parameters
-exp_params = {'NUM_SAMPLES': 5, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
-              'ALPHA_MI': [1], 'ALPHA_GMM': [0.0], 'SIGMAS': [5.0],
+# exp_params = {'NUM_SAMPLES': 5, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
+#               'ALPHA_MI': [0.0, 0.0, 0.0], 'ALPHA_GMM': [1.0, 1.0, 1.0], 'ALPHA_POINTS': [0.0, 0.0, 0.0],
+#               'SIGMAS': [20.0, 10.0, 5.0],
+#               'MAX_ITERS': 500, 'tau_gt': tau_gt.tolist()}
+
+# exp_params = {'NUM_SAMPLES': 5, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
+#               'ALPHA_MI': [8e2, 6e1, 0.6], 'ALPHA_GMM': [1.0, 1.0, 1.0], 'ALPHA_POINTS': [1e-2, 2.5e-3, 2.5e-3],
+#               'SIGMAS': [10.0, 10.0, 10.0],
+#               'MAX_ITERS': 500, 'tau_gt': tau_gt.tolist()}
+
+exp_params = {'NUM_SAMPLES': 1, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
+              'ALPHA_MI': [8e2], 'ALPHA_GMM': [1.0], 'ALPHA_POINTS': [5e-3],
+              'SIGMAS': [10.0],
               'MAX_ITERS': 500, 'tau_gt': tau_gt.tolist()}
 
 LOG_DIR = '../output/logs'
+os.makedirs(LOG_DIR, exist_ok=True)
 with open(os.path.join(LOG_DIR, 'params.json'), 'w') as json_file:
     json.dump(exp_params, json_file, indent=4)
 
@@ -61,6 +75,8 @@ for sample_idx in range(exp_params['NUM_SAMPLES']):
     calibrator.tau = perturb_tau(tau_gt,
                                  trans_std=exp_params['TRANS_ERR_SIGMA'],
                                  angle_std=exp_params['ANGLE_ERR_SIGMA'])
+    # calibrator.tau = tau_gt
+
     # calibrator.tau = np.asarray([ 1.1265747,  -1.20870439,  1.30531639, -0.10396132, -0.11517294, -0.24662881])
     # print('Initial tau')
     # print(calibrator.tau)
@@ -86,17 +102,21 @@ for sample_idx in range(exp_params['NUM_SAMPLES']):
                                 f'edge_points_{sample_idx}_frame_{frame_idx}.jpg'), img_edges)
 
     # Run optimizer
-    for stage_idx, [sigma_in, alpha_mi, alpha_gmm] in enumerate(zip(exp_params['SIGMAS'], exp_params['ALPHA_MI'], exp_params['ALPHA_GMM'])):
+    print()
+    for stage_idx, [sigma_in, alpha_mi, alpha_gmm, alpha_numpoints] \
+            in enumerate(zip(exp_params['SIGMAS'], exp_params['ALPHA_MI'], exp_params['ALPHA_GMM'], exp_params['ALPHA_POINTS'])):
 
         print(f'Optimization {stage_idx + 1}/{len(exp_params["SIGMAS"])}')
-        if stage_idx != 2:
+        if stage_idx >= 0:
             tau_opt, cost_history = calibrator.ls_optimize(sigma_in, alpha_gmm=alpha_gmm,
-                                                           alpha_mi=alpha_mi,
-                                                           maxiter=exp_params['MAX_ITERS'], translation_only=False)
+                                                           alpha_mi=alpha_mi, alpha_numpoints=alpha_numpoints,
+                                                           maxiter=exp_params['MAX_ITERS'], translation_only=False,
+                                                           save_every=2)
         else:
             tau_opt, cost_history = calibrator.ls_optimize(sigma_in, alpha_gmm=alpha_gmm,
-                                                           alpha_mi=alpha_mi,
-                                                           maxiter=exp_params['MAX_ITERS'], translation_only=True)
+                                                           alpha_mi=alpha_mi, alpha_numpoints=alpha_numpoints,
+                                                           maxiter=exp_params['MAX_ITERS'], translation_only=True,
+                                                           save_every=2)
 
         calibrator.tau = tau_opt
         calibrator.project_point_cloud()

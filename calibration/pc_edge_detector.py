@@ -1,11 +1,12 @@
 import numpy as np
 from scipy.spatial import ckdtree
-import time
-from time import sleep
 import matplotlib
 from matplotlib import cm as cm
 import open3d as o3d
+
+import time
 import os
+from glob import glob
 
 class PcEdgeDetector:
 
@@ -34,7 +35,6 @@ class PcEdgeDetector:
             num_points = pc.shape[0]
             center_scores = np.zeros(num_points)
             planar_scores = np.zeros(num_points)
-            pc_edge_scores = np.zeros(num_points)
             pcs_nn_sizes = np.zeros(num_points)
 
             start_t = time.time()
@@ -92,17 +92,16 @@ class PcEdgeDetector:
     def load_pcs(path, frames, subsample=1.0):
         pcs = []
         reflectances = []
-        for frame in frames:
-            if os.path.exists(str(path) + '/velodyne_points/data/' + str(frame).zfill(10) + '.bin'):
-                filename = str(path) + '/velodyne_points/data/' + str(frame).zfill(10) + '.bin'
-                curr_pc = (np.fromfile(filename,
-                                       dtype=np.float32).reshape(-1, 4)[:, :])
-            else:
-                filename = str(path) + '/velodyne_points/data/' + str(frame).zfill(10) + '.txt'
-                curr_pc = (np.loadtxt(filename,
-                                       dtype=np.float32).reshape(-1, 4)[:, :])
 
+        if frames == -1:
+            frame_paths = sorted(glob(os.path.join(path, 'velodyne_points', 'data', '*.bin')))
+        else:
+            frame_paths = [os.path.join(path, 'velodyne_points', 'data', str(frame).zfill(10)) for frame in frames]
 
+        for path in frame_paths:
+            if os.path.exists(path):
+                curr_pc = (np.fromfile(path,
+                                       dtype=np.float32).reshape(-1, 4)[:, :])
 
             pc = curr_pc[:int(subsample * curr_pc.shape[0]), :3]
             refl = curr_pc[:int(subsample * curr_pc.shape[0]), 3]

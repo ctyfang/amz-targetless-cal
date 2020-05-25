@@ -18,10 +18,7 @@ from matplotlib.colors import BoundaryNorm
 from matplotlib.ticker import MaxNLocator
 import scipy.optimize as optimize
 from scipy.stats import gaussian_kde, entropy
-import statsmodels.api as sm
 from KDEpy import FFTKDE, TreeKDE
-#from fastkde import fastKDE
-import seaborn as sns
 
 from calibration.img_edge_detector import ImgEdgeDetector
 from calibration.pc_edge_detector import PcEdgeDetector
@@ -164,7 +161,8 @@ class CameraLidarCalibrator:
         projected_points_valid = self.projected_points[frame][self.projection_mask[frame]]
 
         for pixel, color in zip(projected_points_valid, colors_valid):
-            image[pixel[1].astype(np.int), pixel[0].astype(np.int), :] = color
+            cv2.circle(image, (pixel[0].astype(np.int), pixel[1].astype(np.int)), 1, color.tolist(), -1)
+            # image[pixel[1].astype(np.int), pixel[0].astype(np.int), :] = color
 
         if show:
             cv.imshow('Projected Point Cloud on Image', image)
@@ -625,29 +623,31 @@ class CameraLidarCalibrator:
 
         # TODO: Plot cost over the iterations
 
-    def ls_optimize(self, sigma_in, method='lm', alpha_gmm=1, alpha_mi=30, maxiter=1000, translation_only=False):
+    def ls_optimize(self, sigma_in, method='lm', alpha_gmm=1, alpha_mi=8e2, alpha_numpoints=5e-3, maxiter=600,
+                    translation_only=False, save_every=100):
         """Optimize cost over all image-scan pairs using mutual info and gmm.
             Scale the contributions from two loss sources using alphas."""
         cost_history = []
-        tau_preoptimize = self.tau
-        minimize_options = {'maxiter': maxiter,
-                            'xtol': 1e-5, 'disp': True, 'adaptive': True}
+        nelder_options = {'xtol': 1e-7, 'disp': True, 'adaptive': True, 'maxiter': 600}
+        self.num_iterations = 0
 
         # Store initial tau to mutate if it fails to converge
         self.tau_preoptimize = self.tau
-
-        # End the optimization with at least as many points on the image
-        self.initial_num_points = 0
-        for frame_idx in range(len(self.projection_mask)):
-            self.initial_num_points += np.sum(self.projection_mask[frame_idx])
+        self.opt_save_every = save_every
 
         def loss_callback(xk, state=None):
+            self.num_iterations += 1
             total_valid_points = 0
             for frame_idx in range(len(self.projection_mask)):
                 total_valid_points += np.sum(self.projection_mask[frame_idx])
 
             if total_valid_points < 100000:
                 raise BadProjection
+
+            if self.num_iterations % self.opt_save_every == 0:
+                proj_img = self.draw_all_points()
+                cv.imwrite('opt_img_'+str(self.num_iterations)+'.jpg', proj_img)
+
             return False
 
         optim_successful = False
@@ -661,14 +661,14 @@ class CameraLidarCalibrator:
                 try:
                     bounds = get_trans_bounds(trans_vec, trans_range=0.25)
                     opt_results = optimize.differential_evolution(loss_translation,
-                                                                  bounds,
-                                                                  args=(self, sigma_in, alpha_mi, alpha_gmm, cost_history))
+                                                              bounds,
+                                                              args=(self, sigma_in, alpha_mi, alpha_gmm, alpha_numpoints, cost_history))
                     # opt_results = minimize(loss_translation,
                     #                      trans_vec,
                     #                      method='Nelder-Mead',
                     #                      jac=None,
                     #                      args=(self, sigma_in, alpha_mi, alpha_gmm, cost_history),
-                    #                      options=minimize_options,
+                    #                      options=nelder_options,
                     #                      callback=loss_callback)
 
                     self.tau[3:] = opt_results.x
@@ -682,20 +682,14 @@ class CameraLidarCalibrator:
             else:
                 print('Optimizing over all extrinsics...')
                 tau = self.tau
-                # bounds = get_bounds(tau_quat)
                 try:
-                    # opt_results = optimize.differential_evolution(loss,
-                    #                                               bounds,
-                    #                                               args=(self, sigma_in, alpha_mi, alpha_gmm, cost_history)
-                    #                                               )
                     opt_results = minimize(loss,
-                                           tau,
-                                           method='Nelder-Mead',
-                                           jac=None,
-                                           args=(self, sigma_in, alpha_mi,
-                                                 alpha_gmm, cost_history),
-                                           options=minimize_options,
-                                           callback=loss_callback)
+                                             tau,
+                                             method='Nelder-Mead',
+                                             jac=None,
+                                             args=(self, sigma_in, alpha_mi, alpha_gmm, alpha_numpoints, cost_history),
+                                             options=nelder_options,
+                                             callback=loss_callback)
 
                     self.tau = opt_results.x
                     print("Optimization successful: {}".format(
@@ -754,32 +748,45 @@ class CameraLidarCalibrator:
         self.tau = tau_optimized.x
         return tau_optimized.x
 
-def loss(tau, calibrator, sigma_in, alpha_mi, alpha_gmm, cost_history):
+def loss(tau, calibrator, sigma_in, alpha_mi, alpha_gmm, alpha_numpoints, cost_history):
     # calibrator.tau = CameraLidarCalibrator.tauquat_to_tau(tau_quat_init)
     calibrator.tau = tau
     calibrator.project_point_cloud()
     num_frames = len(calibrator.pc_detector.pcs)
 
-    # During the optimization, penalize extrinsics that result in fewer projected LiDAR points
-    # total_points = 0
-    # for frame_idx in range(num_frames):
-    #     total_points += np.sum(calibrator.projection_mask[frame_idx])
-    # if (total_points/calibrator.initial_num_points) < 0.9:
-    #     return 0
-
-    cost_mi = cost_gmm = 0
+    cost_mi = cost_gmm = cost_numpoints = 0
     for frame_idx in range(num_frames):
         cost_mi += alpha_mi*calibrator.compute_mi_cost(frame_idx)
         cost_gmm += alpha_gmm*calibrator.compute_conv_cost(sigma_in, frame_idx)
+        cost_numpoints += alpha_numpoints*(-np.sum(calibrator.projection_mask[frame_idx]))
 
-    total_cost = (cost_mi/num_frames) + (cost_gmm/num_frames)
+    total_cost = (cost_mi/num_frames) + (cost_gmm/num_frames) + (cost_numpoints/num_frames)
     cost_history.append(total_cost)
-    print([cost_mi, cost_gmm])
+    print([cost_mi, cost_gmm, cost_numpoints])
     # print(cost_history[-1])
     return cost_history[-1]
 
 
-def loss_translation(trans_vec_init, calibrator, sigma_in, alpha_mi, alpha_gmm, cost_history):
+def loss_components(tau, calibrator, sigma_in, alpha_mi, alpha_gmm, alpha_numpoints, cost_history):
+    # calibrator.tau = CameraLidarCalibrator.tauquat_to_tau(tau_quat_init)
+    calibrator.tau = tau
+    calibrator.project_point_cloud()
+    num_frames = len(calibrator.pc_detector.pcs)
+
+    cost_mi = cost_gmm = cost_numpoints = 0
+    for frame_idx in range(num_frames):
+        cost_mi += alpha_mi*calibrator.compute_mi_cost(frame_idx)
+        cost_gmm += alpha_gmm*calibrator.compute_conv_cost(sigma_in, frame_idx)
+        cost_numpoints += alpha_numpoints*(-np.sum(calibrator.projection_mask[frame_idx]))
+
+    total_cost = (cost_mi/num_frames) + (cost_gmm/num_frames) + (cost_numpoints/num_frames)
+    cost_history.append(total_cost)
+    print([cost_mi, cost_gmm, cost_numpoints])
+    # print(cost_history[-1])
+    return [cost_mi/num_frames, cost_gmm/num_frames, cost_numpoints/num_frames]
+
+
+def loss_translation(trans_vec_init, calibrator, sigma_in, alpha_mi, alpha_gmm, alpha_numpoints, cost_history):
     calibrator.tau[3:] = trans_vec_init
     calibrator.project_point_cloud()
     num_frames = len(calibrator.pc_detector.pcs)
@@ -791,14 +798,15 @@ def loss_translation(trans_vec_init, calibrator, sigma_in, alpha_mi, alpha_gmm, 
     # if (total_points / calibrator.initial_num_points) < 0.9:
     #     return 0
 
-    cost_mi = cost_gmm = 0
+    cost_mi = cost_gmm = cost_numpoints = 0
     for frame_idx in range(len(calibrator.pc_detector.pcs)):
         cost_mi += alpha_mi*calibrator.compute_mi_cost(frame_idx)
         cost_gmm += alpha_gmm*calibrator.compute_conv_cost(sigma_in, frame_idx)
+        cost_numpoints += alpha_numpoints * (-np.sum(calibrator.projection_mask[frame_idx]))
 
-    total_cost = cost_mi + cost_gmm
+    total_cost = cost_mi + cost_gmm + cost_numpoints
     cost_history.append(total_cost)
-    print([cost_mi, cost_gmm])
+    print([cost_mi, cost_gmm, cost_numpoints])
     # print(cost_history[-1])
     return cost_history[-1]
 
