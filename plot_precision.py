@@ -2,7 +2,7 @@ from calibration.camera_lidar_calibrator import *
 from calibration.utils.config import command_line_parser
 from calibration.utils.data_utils import *
 from calibration.utils.img_utils import *
-from experiment_precision import filename_init, filename_data
+from experiment_precision import filename_init, filename_data, LOG_DIR
 
 import pickle
 import json
@@ -28,11 +28,16 @@ cfg.img_dir = input_dir
 cfg.calib_dir = calib_dir
 
 
-LOG_DIR = 'generated/logs'
 with open(os.path.join(LOG_DIR, filename_init), 'rb') as f:
     tau_inits = np.load(f)
 with open(os.path.join(LOG_DIR, filename_data), 'rb') as f:
     tau_data = np.load(f)
+
+for idx in range(tau_data.shape[0]):
+    tau_data[idx,:3] = \
+        R.from_rotvec(tau_data[idx,:3]).as_euler('xyz', degrees=True)
+    tau_inits[idx,:3] = \
+        R.from_rotvec(tau_inits[idx,:3]).as_euler('xyz', degrees=True)
 
 fig = plt.figure(figsize=[12, 5])
 ax = [fig.add_subplot(1, 6, 1)]
@@ -49,7 +54,7 @@ for param_idx, param_name in enumerate(['Roll', 'Pitch', 'Yaw', 'X', 'Y', 'Z']):
     ax[param_idx].set_title(param_name)
     if param_idx < 3:
         ax[param_idx].boxplot(
-            np.rad2deg(tau_data[:, param_idx] - np.mean(tau_data[:, param_idx]))
+            tau_data[:, param_idx] - np.mean(tau_data[:, param_idx])
         )
     else:
         ax[param_idx].boxplot(
@@ -76,7 +81,7 @@ plt.close()
 # Mean, Median, Std Deviation
 table = PrettyTable()
 table.field_names = [
-    "N_sample", "X_std", "Y_std", "Z_std", 'Roll_std', 'Pitch_std', 'Yaw_std'
+    "N_sample", 'Roll_std', 'Pitch_std', 'Yaw_std', "X_std", "Y_std", "Z_std"
 ]
 
 row = [tau_data.shape[0]]
