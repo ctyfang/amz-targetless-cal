@@ -8,6 +8,7 @@ import time
 import os
 from glob import glob
 
+
 class PcEdgeDetector:
 
     def __init__(self, cfg, visualize=True):
@@ -94,9 +95,11 @@ class PcEdgeDetector:
         reflectances = []
 
         if frames == -1:
-            frame_paths = sorted(glob(os.path.join(path, 'velodyne_points', 'data', '*.bin')))
+            frame_paths = sorted(
+                glob(os.path.join(path, 'velodyne_points', 'data', '*.bin')))
         else:
-            frame_paths = [os.path.join(path, 'velodyne_points', 'data', str(frame).zfill(10)) for frame in frames]
+            frame_paths = [os.path.join(path, 'velodyne_points', 'data', str(
+                frame).zfill(10)) for frame in frames]
 
         for path in frame_paths:
             if os.path.exists(path):
