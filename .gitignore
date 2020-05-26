@@ -5,3 +5,6 @@ __pycache__
 .*
 output/
 **.npy
+**.jpg
+visualize_horizontal_slices.py 
+convert_temp.py
