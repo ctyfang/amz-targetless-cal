@@ -7,7 +7,8 @@ import cv2
 import sys
 
 
-input_dir_list = ['data/2011_09_26_0017']
+# input_dir_list = ['data/2011_09_26_0017']
+input_dir_list = ['data/collection']
 calib_dir_list = ['data']
 
 cfg = command_line_parser()
@@ -18,18 +19,19 @@ calib_dir = getPath(calib_dir_list)
 cfg.pc_dir = input_dir
 cfg.img_dir = input_dir
 cfg.calib_dir = calib_dir
-cfg.frames = [99, 139, 149, 150, 151, 152, 153]
+# cfg.frames = [99, 139, 149, 150, 151, 152, 153]
+cfg.frames = [34, 35, 185]
 
-new = False
+new = True
 if new:
     # Detect edges from scratch
     calibrator = CameraLidarCalibrator(cfg, visualize=False)
-    with open('generated/calibrator.pkl', 'wb') as output_pkl:
+    with open('generated/calibratorset3.pkl', 'wb') as output_pkl:
         pickle.dump(calibrator, output_pkl, pickle.HIGHEST_PROTOCOL)
     print('Initialization Done')
 else:
     # Load calibrator from pickle
-    with open('generated/calibrator.pkl', 'rb') as input_pkl:
+    with open('generated/calibratorset3.pkl', 'rb') as input_pkl:
         calibrator = pickle.load(input_pkl)
         calibrator.visualize = True
 
@@ -44,7 +46,7 @@ print(len(calibrator.img_detector.imgs))
 # print('Done Drawing')
 
 # print(calibrator.compute_conv_cost(120, frame=frame))
-print(calibrator.batch_optimization(120))
+# print(calibrator.batch_optimization(120))
 # sys.exit()
 # print(calibrator.compute_bf_cost(120))
 

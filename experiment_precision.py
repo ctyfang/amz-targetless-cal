@@ -19,8 +19,8 @@ calib_dir_list = [
     '/home/benjin/Development/Data/2011_09_26_calib/2011_09_26',
     'data'
 ]
-trial = 'set_3_t_10_r_15'
-
+trial = 'set_3_t_10_r_05'
+LOG_DIR = os.path.join('generated','logs', trial)
 
 filename_init = 'tau_init' + trial + '.npy'
 filename_data = 'tau_data' + trial + '.npy'
@@ -47,15 +47,16 @@ if __name__ == '__main__':
     exp_params = {
         'NUM_SAMPLES': 1000,
         'TRANS_ERR_SIGMA': 0.2,
-        'ANGLE_ERR_SIGMA': 15,
+        'ANGLE_ERR_SIGMA': 5,
         'ALPHA_MI': [30.0],
         'ALPHA_GMM': [1.0],
-        'SIGMAS': [15.0, 5.0, 3.0, 1.0],
+        'SIGMAS': [10.0],
         'MAX_ITERS': 500,
         'tau_gt': tau_gt.tolist()
     }
 
     LOG_DIR = os.path.join('generated','logs', trial)
+    os.makedirs(LOG_DIR, exist_ok=True)
     with open(os.path.join(LOG_DIR, 'params.json'), 'w') as json_file:
         json.dump(exp_params, json_file, indent=4)
 
@@ -92,9 +93,9 @@ if __name__ == '__main__':
             if stage_idx != 2:
                 tau_opt, cost_history = calibrator.ls_optimize(
                     sigma_in,
-                    alpha_gmm=alpha_gmm,
-                    alpha_mi=alpha_mi,
-                    maxiter=exp_params['MAX_ITERS'],
+                    # alpha_gmm=alpha_gmm,
+                    # alpha_mi=alpha_mi,
+                    # maxiter=exp_params['MAX_ITERS'],
                     translation_only=False)
             else:
                 tau_opt, cost_history = calibrator.ls_optimize(

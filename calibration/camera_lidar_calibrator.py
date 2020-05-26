@@ -623,7 +623,8 @@ class CameraLidarCalibrator:
 
         # TODO: Plot cost over the iterations
 
-    def ls_optimize(self, sigma_in, method='lm', alpha_gmm=1, alpha_mi=8e2, alpha_numpoints=5e-3, maxiter=600,
+    def ls_optimize(self, sigma_in, method='lm', alpha_gmm=1, alpha_mi=8e2,
+                    alpha_numpoints=5e-3, maxiter=600,
                     translation_only=False, save_every=100):
         """Optimize cost over all image-scan pairs using mutual info and gmm.
             Scale the contributions from two loss sources using alphas."""
@@ -641,12 +642,12 @@ class CameraLidarCalibrator:
             for frame_idx in range(len(self.projection_mask)):
                 total_valid_points += np.sum(self.projection_mask[frame_idx])
 
-            if total_valid_points < 100000:
+            if total_valid_points < 10000:
                 raise BadProjection
 
-            if self.num_iterations % self.opt_save_every == 0:
-                proj_img = self.draw_all_points()
-                cv.imwrite('opt_img_'+str(self.num_iterations)+'.jpg', proj_img)
+            # if self.num_iterations % self.opt_save_every == 0:
+            #     proj_img = self.draw_all_points()
+            #     cv.imwrite('opt_img_'+str(self.num_iterations)+'.jpg', proj_img)
 
             return False
 
@@ -700,7 +701,7 @@ class CameraLidarCalibrator:
 
                 except BadProjection:
                     print("Bad projection.. trying again")
-                    self.tau = perturb_tau(self.tau_preoptimized, 0.005, 0.5)
+                    self.tau = perturb_tau(self.tau_preoptimize, 0.005, 0.5)
                     cost_history = []
 
         print(f"NL optimizer time={time.time()-start}")
