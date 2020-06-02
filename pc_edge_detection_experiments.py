@@ -131,22 +131,18 @@ for ring in range(64):
 
     # rml: depth of right point minus depth of left point
     delta_depth_rml = depth - np.roll(depth, -1)
-    delta_delta_depth_rml = delta_depth_rml - np.roll(delta_depth_rml, -1)
     # lmr: depth of left point minus depth of right point
     delta_depth_lmr = depth - np.roll(depth, +1)
-    delta_delta_depth_lmr = delta_depth_lmr - np.roll(delta_depth_lmr, +1)
 
     # Visualize depth, and delta depth against azimuth_angle_sorted
     VISUALIZE_DELTA_DEPTH_AGAINST_AZIMUTH_ANGLE = False
     if VISUALIZE_DELTA_DEPTH_AGAINST_AZIMUTH_ANGLE:
         fig, ax = plt.subplots(figsize=(20, 10))
 
-        ax.scatter(azimuth_angle_sorted[:300], depth[:300], s=1, alpha=0.75)
+        ax.scatter(azimuth_angle_sorted[:1000], depth[:1000], s=1, alpha=0.75)
 
-        ax.scatter(azimuth_angle_sorted[:300],
-                   delta_delta_depth_lmr[:300], s=1, c='blue')
-        ax.scatter(azimuth_angle_sorted[:300],
-                   delta_depth_lmr[:300], s=1, c='red')
+        ax.scatter(azimuth_angle_sorted[:1000],
+                   delta_depth_lmr[:1000], s=1, c='red')
 
         plt.tight_layout(pad=3.0)
         plt.show()
@@ -162,7 +158,7 @@ for ring in range(64):
     current_ring_edge_idxs = current_ring_idxs[current_ring_order]
 
     # Visualize edges in current ring
-    VISUALIZE_EDGES_IN_RING = False
+    VISUALIZE_EDGES_IN_RING = True
     if VISUALIZE_EDGES_IN_RING:
         visualize_point_cloud(
             current_ring_sorted, edges_filter, cmap=cm.summer)
