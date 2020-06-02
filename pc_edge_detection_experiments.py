@@ -67,10 +67,10 @@ pc1 = calibrator.pc_detector.pcs[0]
 polar_angle = 180 * np.arctan2(pc1[:, 2], np.sqrt(
     np.square(pc1[:, 0]) + np.square(pc1[:, 1]))) / np.pi
 
-# Calculate 64 means
-# Calculate an initial guess
+# Calculate 64 cluster means
 max_polar_angle = np.max(polar_angle)
 min_polar_angle = np.min(polar_angle)
+# Calculate an initial guess
 init_guess = np.linspace(min_polar_angle, max_polar_angle, num=64)
 kmeans = KMeans(n_clusters=64, init=init_guess.reshape(-1, 1)
                 ).fit(polar_angle.reshape(-1, 1))
@@ -98,8 +98,7 @@ if VISUALIZE_SEGMENTED_POINT_CLOUD:
     labels = np.mod(kmeans.labels_.copy(), modulo_vector)
     visualize_point_cloud(pc1, labels)
 
-# Fill list with np arrays that contain the points of one specific ring
-edges = np.array([0.0, 0.0, 0.0], dtype=np.float32)
+# Fill list with the idxs of edges
 edge_idxs = []
 
 for ring in range(64):
@@ -124,14 +123,14 @@ for ring in range(64):
     # Visualize current ring colored by azimuth value
     VISUALIZE_CURRENT_RING = False
     if VISUALIZE_CURRENT_RING:
-        temp_azimuth_angle = 180 * \
-            np.arctan2(current_ring_sorted
-                       [:, 1], current_ring_sorted[:, 0]) / np.pi
         visualize_point_cloud(
-            current_ring_sorted, temp_azimuth_angle, cmap=cm.summer)
+            current_ring_sorted, azimuth_angle_sorted, cmap=cm.summer)
 
     # Calculate the depth of each point
     depth = np.linalg.norm(current_ring_sorted, axis=1)
+
+    # Try some filters
+    depth = signal.medfilt(depth, kernel_size=9)
 
     # rml: depth of right point minus depth of left point
     delta_depth_rml = depth - np.roll(depth, -1)

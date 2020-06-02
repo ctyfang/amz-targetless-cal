@@ -1,8 +1,9 @@
 import numpy as np
 from scipy.spatial import ckdtree
-import matplotlib
+import matplotlib.pyplot as plt
 from matplotlib import cm as cm
 import open3d as o3d
+from sklearn.cluster import KMeans
 
 import time
 import os
@@ -23,6 +24,7 @@ class PcEdgeDetector:
         self.PC_ED_SCORE_THR = cfg.pc_ed_score_thr
         self.PC_ED_RAD_NN = cfg.pc_ed_rad_nn
         self.PC_ED_NUM_NN = cfg.pc_ed_num_nn
+        self.PC_NUM_CHANNELS = 64
 
     def pc_detect(self, pcs_cam_frame, thresh=0.6, num_nn=100, rad_nn=0.1, visualize=False):
         """
@@ -65,9 +67,15 @@ class PcEdgeDetector:
                 center_scores[point_idx] = center_score
                 planar_scores[point_idx] = planarity_score
 
-            # Combine two edge scores
+            # Calculate the depth discontinuity score
+            depth_discontinuity_scores = compute_depth_discontinuity_score(
+                pc, self.PC_NUM_CHANNELS)
+
+            # Combine three edge scores
             # (Global normalization, local neighborhood size normalization)
             pc_edge_scores = np.multiply(center_scores, planar_scores)
+            pc_edge_scores = np.multiply(
+                pc_edge_scores, depth_discontinuity_scores)
             pc_edge_scores /= np.max(pc_edge_scores)
             self.pcs_edge_scores.append(pc_edge_scores)
             print(f"Total pc scoring time:{time.time() - start_t}")
@@ -145,6 +153,108 @@ class PcEdgeDetector:
         return planarity
 
     @staticmethod
+    def compute_depth_discontinuity_score(point_cloud, num_channels):
+        # Description: Compute vertical edges using depth discontinuity as the edge indicator. First
+        #              the points of the point cloud are sorted according to their polar angle to
+        #              group the points into their corresponding channels. Then the points of the
+        #              channels are sorted according to their azimuth angle. After calculating the depth
+        #              of each point, the change of depth between consecutive points in the sorted
+        #              channel is calculated. If this change is above a threshold for a certain point,
+        #              it is considered an edge.
+        # Return:      A binary mask indicating edges in the point cloud.
+
+        # Calculate the polar angle for every point
+        polar_angle = 180 * np.arctan2(point_cloud[:, 2], np.sqrt(
+            np.square(point_cloud[:, 0]) + np.square(point_cloud[:, 1]))) / np.pi
+
+        # Calculate 64 cluster means
+        max_polar_angle = np.max(polar_angle)
+        min_polar_angle = np.min(polar_angle)
+        # Calculate an initial guess
+        init_guess = np.linspace(
+            min_polar_angle, max_polar_angle, num=num_channels)
+        kmeans = KMeans(n_clusters=num_channels, init=init_guess.reshape(-1, 1)
+                        ).fit(polar_angle.reshape(-1, 1))
+
+        # Fill list with the idxs of edges
+        edge_idxs = []
+
+        for channel in range(num_channels):
+            # Binary mask for the points of the current channel
+            current_channel_mask = (kmeans.labels_ == channel)
+            # Indices of the points of the current channel
+            current_channel_idxs = np.argwhere(current_channel_mask)
+            # Array of the points of the current channel
+            current_channel_points = point_cloud[current_channel_mask]
+            # Array that assigns every point in current_channel_points an index
+            current_channel_order = np.arange(current_channel_points.shape[0])
+
+            # Calculate the azimuth angles of the points of the channel
+            azimuth_angle = 180 * \
+                np.arctan2(
+                    current_channel_points[:, 1], current_channel_points[:, 0]) / np.pi
+
+            # Find the array that sorts the points of the current channel according to its azimuth angle
+            sort_by_azimuth_angle = np.argsort(azimuth_angle)
+
+            azimuth_angle_sorted = azimuth_angle[sort_by_azimuth_angle]
+            current_channel_points_sorted = current_channel_points[sort_by_azimuth_angle]
+            current_channel_order = current_channel_order[sort_by_azimuth_angle]
+
+            # Visualize current ring colored by azimuth value
+            VISUALIZE_CURRENT_RING = False
+            if VISUALIZE_CURRENT_RING:
+                visualize_xyz_scores(
+                    current_channel_points_sorted, azimuth_angle_sorted, cmap=cm.summer)
+
+            # Calculate the depth of each point
+            depth = np.linalg.norm(current_channel_points_sorted, axis=1)
+
+            # rml: depth of right point minus depth of left point
+            delta_depth_rml = depth - np.roll(depth, -1)
+            # lmr: depth of left point minus depth of right point
+            delta_depth_lmr = depth - np.roll(depth, +1)
+
+            # Visualize depth, and delta depth against azimuth_angle_sorted
+            VISUALIZE_DELTA_DEPTH_AGAINST_AZIMUTH_ANGLE = False
+            if VISUALIZE_DELTA_DEPTH_AGAINST_AZIMUTH_ANGLE:
+                fig, ax = plt.subplots(figsize=(20, 10))
+                ax.scatter(
+                    azimuth_angle_sorted[:300], depth[:300], s=1, alpha=0.75)
+                ax.scatter(azimuth_angle_sorted[:300],
+                           delta_depth_lmr[:300], s=1, c='red')
+                plt.tight_layout(pad=3.0)
+                plt.show()
+
+            edges_filter = np.logical_or(
+                delta_depth_rml < -0.5, delta_depth_lmr < -0.5)
+
+            current_edges = current_channel_points_sorted[edges_filter]
+
+            # Get the idxs of the points in the current channel that are edges
+            current_channel_order = current_channel_order[edges_filter]
+
+            # Get the idxs of the points in the point cloud that are edges
+            current_ring_edge_idxs = current_channel_idxs[current_channel_order]
+
+            # Visualize edges in current ring
+            VISUALIZE_EDGES_IN_RING = False
+            if VISUALIZE_EDGES_IN_RING:
+                visualize_xyz_scores(
+                    current_channel_points_sorted, edges_filter, cmap=cm.summer)
+
+            # Delete current edges if too many are detected
+            if current_edges.shape[0] > 500:
+                continue
+
+            edge_idxs.extend(current_ring_edge_idxs.tolist())
+
+        # Get the binary mask indicating the edge points in the point cloud
+        point_cloud_mask = np.zeros(point_cloud.shape[0])
+        point_cloud_mask[edge_idxs] = True
+        return point_cloud_mask
+
+    @staticmethod
     def get_first_and_last_channels_idxs(pc, ch_to_remove=3, hor_res=0.2):
         """
         Returns numpy array of the point indices that are in the first and last channels
@@ -190,14 +300,14 @@ class PcEdgeDetector:
                                   vmax=v_max)
 
     @staticmethod
-    def visualize_xyz_scores(xyz, scores, vmin=None, vmax=None):
+    def visualize_xyz_scores(xyz, scores, vmin=None, vmax=None, cmap=cm.tab20c):
         if vmin is None:
             vmin = np.min(scores)
         if vmax is None:
             vmax = np.max(scores)
 
         norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax, clip=True)
-        mapper = cm.ScalarMappable(norm=norm, cmap=cm.jet)
+        mapper = cm.ScalarMappable(norm=norm, cmap=cmap)
         colors = np.asarray(mapper.to_rgba(scores))
 
         pcd = o3d.geometry.PointCloud()
