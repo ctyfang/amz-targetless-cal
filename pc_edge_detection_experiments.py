@@ -29,7 +29,7 @@ def visualize_point_cloud(point_cloud, scores, cmap=cm.tab20c):
 
 
 ##### FLAGS ####
-VISUALIZE_POLAR_ANGLE_SCATTER_PLOT = False
+VISUALIZE_POLAR_ANGLE_SCATTER_PLOT = True
 VISUALIZE_SEGMENTED_POINT_CLOUD = False
 ################
 
@@ -56,12 +56,12 @@ cfg.calib_dir = calib_dir
 #     pickle.dump(calibrator, output_pkl, pickle.HIGHEST_PROTOCOL)
 
 # # Load calibrator with detected edges from pickled object
-with open('./output/calibrator_3dv_kitti_2011_09_26_static_scenes_thr1_150_thr2_200_thr_0p3.pkl', 'rb') as input_pkl:
+with open('./output/calibrator_imgthresh200-300_pcthresh04_3_imgs_dataset_34.pkl', 'rb') as input_pkl:
     calibrator = pickle.load(input_pkl)
     calibrator.visualize = True
 
 # Velodyne Point Cloud
-pc1 = calibrator.pc_detector.pcs[3]
+pc1 = calibrator.pc_detector.pcs[0]
 
 # Calculate the polar angle for every point
 polar_angle = 180 * np.arctan2(pc1[:, 2], np.sqrt(
@@ -128,9 +128,6 @@ for ring in range(64):
 
     # Calculate the depth of each point
     depth = np.linalg.norm(current_ring_sorted, axis=1)
-
-    # Try some filters
-    depth = signal.medfilt(depth, kernel_size=9)
 
     # rml: depth of right point minus depth of left point
     delta_depth_rml = depth - np.roll(depth, -1)
