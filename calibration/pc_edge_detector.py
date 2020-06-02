@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.spatial import ckdtree
 import matplotlib.pyplot as plt
+import matplotlib
 from matplotlib import cm as cm
 import open3d as o3d
 from sklearn.cluster import KMeans
@@ -38,7 +39,6 @@ class PcEdgeDetector:
             num_points = pc.shape[0]
             center_scores = np.zeros(num_points)
             planar_scores = np.zeros(num_points)
-            pcs_nn_sizes = np.zeros(num_points)
 
             start_t = time.time()
             kdtree = ckdtree.cKDTree(pc)
@@ -55,7 +55,6 @@ class PcEdgeDetector:
                 neighbor_i = np.append(neighbor_i1, neighbor_i2).astype(np.int)
                 neighbor_d = np.append(neighbor_d1, neighbor_d2)
 
-                pcs_nn_sizes[point_idx] = neighbor_d.shape[0]
                 neighborhood_xyz = pc[neighbor_i.tolist(), :]
 
                 center_score = self.compute_centerscore(neighborhood_xyz,
@@ -68,14 +67,14 @@ class PcEdgeDetector:
                 planar_scores[point_idx] = planarity_score
 
             # Calculate the depth discontinuity score
-            depth_discontinuity_scores = compute_depth_discontinuity_score(
+            depth_discontinuity_scores = self.compute_depth_discontinuity_score(
                 pc, self.PC_NUM_CHANNELS)
 
             # Combine three edge scores
             # (Global normalization, local neighborhood size normalization)
             pc_edge_scores = np.multiply(center_scores, planar_scores)
             pc_edge_scores = np.multiply(
-                pc_edge_scores, depth_discontinuity_scores)
+                depth_discontinuity_scores, pc_edge_scores)
             pc_edge_scores /= np.max(pc_edge_scores)
             self.pcs_edge_scores.append(pc_edge_scores)
             print(f"Total pc scoring time:{time.time() - start_t}")
@@ -94,8 +93,9 @@ class PcEdgeDetector:
                 np.squeeze(np.argwhere(self.pcs_edge_masks[-1])))
 
         if visualize:
-            self.pc_visualize_edges(self.pcs[-1], self.pcs_edge_idxs[-1],
-                                    self.pcs_edge_scores[-1])
+            for idx in range(len(self.pcs)):
+                self.pc_visualize_edges(self.pcs[idx], self.pcs_edge_idxs[idx],
+                                        self.pcs_edge_scores[idx])
 
     @staticmethod
     def load_pcs(path, frames, subsample=1.0):
@@ -107,7 +107,7 @@ class PcEdgeDetector:
                 glob(os.path.join(path, 'velodyne_points', 'data', '*.bin')))
         else:
             frame_paths = [os.path.join(path, 'velodyne_points', 'data', str(
-                frame).zfill(10)) for frame in frames]
+                frame).zfill(10)) + ".bin" for frame in frames]
 
         for path in frame_paths:
             if os.path.exists(path):

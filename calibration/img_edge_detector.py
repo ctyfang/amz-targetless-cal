@@ -24,7 +24,8 @@ class ImgEdgeDetector:
         self.img_h, self.img_w = self.imgs[0].shape[:2]
         for frame_idx in range(len(self.imgs)):
             curr_h, curr_w = self.imgs[frame_idx].shape[:2]
-            self.img_h, self.img_w = min(self.img_h, curr_h), min(self.img_w, curr_w)
+            self.img_h, self.img_w = min(
+                self.img_h, curr_h), min(self.img_w, curr_w)
 
     def img_detect(self, visualize=False):
         '''
@@ -35,8 +36,10 @@ class ImgEdgeDetector:
             gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
             blurred = gaussian_filter(gray, sigma=2, order=0, mode='reflect')
 
-            gradient_x = convolve(blurred, [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]])
-            gradient_y = convolve(blurred, [[1, 2, 1], [0, 0, 0], [-1, -2, -1]])
+            gradient_x = convolve(
+                blurred, [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]])
+            gradient_y = convolve(
+                blurred, [[1, 2, 1], [0, 0, 0], [-1, -2, -1]])
 
             img_edge_scores = np.sqrt(
                 np.power(gradient_x, 2) + np.power(gradient_y, 2))
@@ -91,9 +94,11 @@ class ImgEdgeDetector:
         imgs = []
 
         if frames == -1:
-            frame_paths = sorted(glob(os.path.join(path, 'image_00', 'data', '*.png')))
+            frame_paths = sorted(
+                glob(os.path.join(path, 'image_00', 'data', '*.png')))
         else:
-            frame_paths = [os.path.join(path, 'image_00', 'data', str(frame).zfill(10)) for frame in frames]
+            frame_paths = [os.path.join(path, 'image_00', 'data', str(
+                frame).zfill(10)) + '.png' for frame in frames]
 
         for path in frame_paths:
             imgs.append(cv.imread(path))

@@ -73,14 +73,14 @@ cfg.pc_dir = input_dir
 cfg.img_dir = input_dir
 cfg.calib_dir = calib_dir
 
-cfg.frames = [20, 26, 48, 64, 77, 99, 224, 266, 374, 428]
+cfg.frames = [48, 77, 224, 266, 374, 428]
 # cfg.frames = [26, 374, 428]
 # cfg.frames = [34, 35, 185]
 
 
-DETECT_FROM_SCRATCH = True
+DETECT_FROM_SCRATCH = False
 SAVE_IMAGES = True
-CALIBRATION_OBJECT_PATH = './output/calibrator_imgthresh200-300_pcthresh04_10_imgs_dataset.pkl'
+CALIBRATION_OBJECT_PATH = './output/calibrator_3dv_kitti_2011_09_26_static_scenes_thr1_100_thr2_200_thr_0p275.pkl'
 
 if DETECT_FROM_SCRATCH:
     # Detect edges from scratch

@@ -47,7 +47,7 @@ def command_line_parser():
         help='Initial guess of the transformation')
 
     parser.add_argument(
-        '--frames', type=json.loads, default='[0, 1, 6, 19, 33, 34, 35, 185, 257]',
+        '--frames', type=json.loads, default='[]',
         help='Initial guess of the transformation')
 
     parser.add_argument(

@@ -56,12 +56,12 @@ cfg.calib_dir = calib_dir
 #     pickle.dump(calibrator, output_pkl, pickle.HIGHEST_PROTOCOL)
 
 # # Load calibrator with detected edges from pickled object
-with open('./output/calibrator_imgthresh200-300_pcthresh04_3_imgs_dataset_34.pkl', 'rb') as input_pkl:
+with open('./output/calibrator_3dv_kitti_2011_09_26_static_scenes_thr1_150_thr2_200_thr_0p3.pkl', 'rb') as input_pkl:
     calibrator = pickle.load(input_pkl)
     calibrator.visualize = True
 
 # Velodyne Point Cloud
-pc1 = calibrator.pc_detector.pcs[0]
+pc1 = calibrator.pc_detector.pcs[3]
 
 # Calculate the polar angle for every point
 polar_angle = 180 * np.arctan2(pc1[:, 2], np.sqrt(
