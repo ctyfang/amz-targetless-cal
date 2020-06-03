@@ -27,26 +27,40 @@ class ImgEdgeDetector:
             self.img_h, self.img_w = min(
                 self.img_h, curr_h), min(self.img_w, curr_w)
 
-    def img_detect(self, visualize=False):
+    def img_detect(self, method='canny', visualize=False):
         '''
         Compute pixel-wise edge score with non-maximum suppression
         Scores are normalized so that maximum score is 1
         '''
+        model = os.path.join(os.getcwd(), 'calibration/configs/sed_model.yml')
+        sed_model = cv.ximgproc.createStructuredEdgeDetection(model)
         for img in self.imgs:
-            gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-            blurred = gaussian_filter(gray, sigma=2, order=0, mode='reflect')
 
-            gradient_x = convolve(
-                blurred, [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]])
-            gradient_y = convolve(
-                blurred, [[1, 2, 1], [0, 0, 0], [-1, -2, -1]])
+            if method == 'canny':
+                gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
+                blurred = gaussian_filter(gray, sigma=2, order=0, mode='reflect')
 
-            img_edge_scores = np.sqrt(
-                np.power(gradient_x, 2) + np.power(gradient_y, 2))
-            img_edges = cv.Canny(img,
-                                 self.ed_thresh_low,
-                                 self.ed_thresh_high,
-                                 L2gradient=True).astype(bool)
+                gradient_x = convolve(
+                    blurred, [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]])
+                gradient_y = convolve(
+                    blurred, [[1, 2, 1], [0, 0, 0], [-1, -2, -1]])
+
+                img_edge_scores = np.sqrt(
+                    np.power(gradient_x, 2) + np.power(gradient_y, 2))
+                img_edges = cv.Canny(img,
+                                     self.ed_thresh_low,
+                                     self.ed_thresh_high,
+                                     L2gradient=True).astype(bool)
+
+            else: # Use Structured Edge Detector
+                img = img / 255
+                img = img.astype(np.float32)
+                img_edge_scores = sed_model.detectEdges(img)
+                orientations = sed_model.computeOrientation(img_edge_scores)
+                img_edges = sed_model.edgesNms(img_edge_scores, orientations, r=2, s=0, m=1)
+                _, img_edges = cv.threshold(img_edges, 0.25, 1.0, cv.THRESH_BINARY)
+                img_edges = img_edges.astype(np.bool)
+
             img_edge_scores[~img_edges] = 0
             img_edge_scores = img_edge_scores / np.amax(img_edge_scores)
             self.img_edge_scores.append(img_edge_scores)

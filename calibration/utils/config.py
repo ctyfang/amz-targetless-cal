@@ -30,6 +30,14 @@ def command_line_parser():
         help='Threshold above which points are considered edge points')
 
     parser.add_argument(
+        '--pc_ed_method', type=str, default='sed',
+        help='Method used for image edge detection: sed or canny')
+
+    parser.add_argument(
+        '--im_ed_score_thr', type=float, default=0.25,
+        help='Threshold used for SED')
+
+    parser.add_argument(
         '--im_ed_score_thr1', type=float, default=200,
         help='Lower threshold for Canny')
 
@@ -47,7 +55,7 @@ def command_line_parser():
         help='Initial guess of the transformation')
 
     parser.add_argument(
-        '--frames', type=json.loads, default='[]',
+        '--frames', type=json.loads, default='[1, 6, 19]',
         help='Initial guess of the transformation')
 
     parser.add_argument(
