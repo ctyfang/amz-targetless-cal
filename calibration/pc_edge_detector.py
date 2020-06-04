@@ -66,16 +66,33 @@ class PcEdgeDetector:
                 center_scores[point_idx] = center_score
                 planar_scores[point_idx] = planarity_score
 
+            # Combine three edge scores
+            # (Global normalization, local neighborhood size normalization)
+            pc_edge_scores_1 = center_scores
+            pc_edge_scores_1 = (pc_edge_scores_1 - pc_edge_scores_1.min())/(pc_edge_scores_1.max() - pc_edge_scores_1.min())
+
+            pc_edge_scores_2 = planar_scores
+            pc_edge_scores_2 = (pc_edge_scores_2 - pc_edge_scores_2.min())/(pc_edge_scores_2.max() - pc_edge_scores_2.min())
+            pc_edge_scores = pc_edge_scores_1*pc_edge_scores_2
+
             # Calculate the depth discontinuity score
             depth_discontinuity_scores = self.compute_depth_discontinuity_score(
                 pc, self.PC_NUM_CHANNELS)
+            pc_edge_scores_3 = depth_discontinuity_scores
+            pc_edge_scores_3 = (pc_edge_scores_3 - pc_edge_scores_3.min())/(pc_edge_scores_3.max() - pc_edge_scores_3.min())
+            pc_edge_scores = pc_edge_scores*pc_edge_scores_3
 
-            # Combine three edge scores
-            # (Global normalization, local neighborhood size normalization)
-            pc_edge_scores = np.multiply(center_scores, planar_scores)
-            pc_edge_scores = np.multiply(
-                depth_discontinuity_scores, pc_edge_scores)
-            pc_edge_scores /= np.max(pc_edge_scores)
+            # NMS
+            points_suppressed = 0
+            for point_idx in range(num_points):
+                curr_score = pc_edge_scores[point_idx]
+                neighbor_i = kdtree.query_ball_point(curr_xyz, rad_nn)
+                neighbor_scores = pc_edge_scores[neighbor_i]
+
+                if (neighbor_scores > curr_score).any():
+                    pc_edge_scores[point_idx] = 0
+                    points_suppressed += 1
+
             self.pcs_edge_scores.append(pc_edge_scores)
             print(f"Total pc scoring time:{time.time() - start_t}")
 
@@ -110,9 +127,16 @@ class PcEdgeDetector:
                 frame).zfill(10)) + ".bin" for frame in frames]
 
         for path in frame_paths:
-            if os.path.exists(path):
+            _, ext = os.path.splitext(path)
+            if ext == '.bin':
                 curr_pc = (np.fromfile(path,
-                                       dtype=np.float32).reshape(-1, 4)[:, :])
+                                       dtype=np.float32).reshape(-1, 4))[:, :]
+            elif ext == '.txt':
+                curr_pc = (np.loadtxt(path,
+                                       dtype=np.float32).reshape(-1, 4))[:, :]
+
+            else:
+                continue
 
             pc = curr_pc[:int(subsample * curr_pc.shape[0]), :3]
             refl = curr_pc[:int(subsample * curr_pc.shape[0]), 3]
@@ -143,7 +167,8 @@ class PcEdgeDetector:
         n_points = centered_xyz.shape[0]
         s = np.zeros((3, 3))
         for i in range(n_points):
-            s += np.dot(centered_xyz[i, :].T, centered_xyz[i, :])
+            test = np.dot(centered_xyz[i, :].reshape((3, 1)), centered_xyz[i, :].reshape((1, 3)))
+            s += test
         s /= n_points
 
         # Compute planarity of neighborhood using SVD (Xia & Wang 2017)
@@ -179,6 +204,9 @@ class PcEdgeDetector:
         # Fill list with the idxs of edges
         edge_idxs = []
 
+        # Return depth discontinuity scores
+        point_cloud_ddepth = np.zeros(point_cloud.shape[0])
+
         for channel in range(num_channels):
             # Binary mask for the points of the current channel
             current_channel_mask = (kmeans.labels_ == channel)
@@ -210,7 +238,8 @@ class PcEdgeDetector:
             # Calculate the depth of each point
             depth = np.linalg.norm(current_channel_points_sorted, axis=1)
 
-            # rml: depth of right point minus depth of left point
+            # Ben method
+            rml: depth of right point minus depth of left point
             delta_depth_rml = depth - np.roll(depth, -1)
             # lmr: depth of left point minus depth of right point
             delta_depth_lmr = depth - np.roll(depth, +1)
@@ -228,6 +257,23 @@ class PcEdgeDetector:
 
             edges_filter = np.logical_or(
                 delta_depth_rml < -0.5, delta_depth_lmr < -0.5)
+
+            # Wang method
+            # a = 8
+            # smooth_depth_i = np.zeros(depth.shape)
+            # smooth_depth_j = np.zeros(depth.shape)
+            # for k in range(-a, a+1):
+            #     smooth_depth_i += np.roll(depth, k)/(2*a+1)
+            #     smooth_depth_j += np.roll(depth, k-1)/(2*a+1)
+            # ddepth = np.abs(smooth_depth_i - smooth_depth_j)
+            # ddepth_thresh = np.percentile(ddepth, 75)
+
+            # nms
+            # for k in range(1, ddepth.shape[0]-1):
+            #     if ddepth[k] < ddepth[k-1] or ddepth[k] < ddepth[k+1]:
+            #         ddepth[k] = 0
+            # point_cloud_ddepth[current_channel_idxs] = np.expand_dims(ddepth, 1)
+            # edges_filter = ddepth > ddepth_thresh
 
             current_edges = current_channel_points_sorted[edges_filter]
 
@@ -252,6 +298,7 @@ class PcEdgeDetector:
         # Get the binary mask indicating the edge points in the point cloud
         point_cloud_mask = np.zeros(point_cloud.shape[0])
         point_cloud_mask[edge_idxs] = True
+
         return point_cloud_mask
 
     @staticmethod
