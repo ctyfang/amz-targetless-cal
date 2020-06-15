@@ -2,7 +2,9 @@ data/*
 generated/*
 __pycache__
 .vscode
-.*
+.pylintrc
+.DS_Store
 output/
 **.npy
 **.jpg
+.DS_Store
