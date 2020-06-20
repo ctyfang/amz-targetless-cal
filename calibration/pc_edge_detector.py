@@ -86,7 +86,7 @@ class PcEdgeDetector:
             points_suppressed = 0
             for point_idx in range(num_points):
                 curr_score = pc_edge_scores[point_idx]
-                neighbor_i = kdtree.query_ball_point(curr_xyz, rad_nn)
+                neighbor_i = kdtree.query_ball_point(curr_xyz, 0.10)
                 neighbor_scores = pc_edge_scores[neighbor_i]
 
                 if (neighbor_scores > curr_score).any():
@@ -97,6 +97,7 @@ class PcEdgeDetector:
             print(f"Total pc scoring time:{time.time() - start_t}")
 
             # Remove all points with an edge score below the threshold
+            thresh = np.percentile(pc_edge_scores, 60)
             self.pcs_edge_masks.append(self.pcs_edge_scores[-1] > thresh)
             # Exclude boundary points in final thresholding
             pc_boundary_idxs = self.get_first_and_last_channels_idxs(pc)
@@ -239,7 +240,7 @@ class PcEdgeDetector:
             depth = np.linalg.norm(current_channel_points_sorted, axis=1)
 
             # Ben method
-            rml: depth of right point minus depth of left point
+            # rml: depth of right point minus depth of left point
             delta_depth_rml = depth - np.roll(depth, -1)
             # lmr: depth of left point minus depth of right point
             delta_depth_lmr = depth - np.roll(depth, +1)
@@ -258,8 +259,8 @@ class PcEdgeDetector:
             edges_filter = np.logical_or(
                 delta_depth_rml < -0.5, delta_depth_lmr < -0.5)
 
-            # Wang method
-            # a = 8
+            # # Wang method
+            # a = 5
             # smooth_depth_i = np.zeros(depth.shape)
             # smooth_depth_j = np.zeros(depth.shape)
             # for k in range(-a, a+1):
@@ -267,8 +268,8 @@ class PcEdgeDetector:
             #     smooth_depth_j += np.roll(depth, k-1)/(2*a+1)
             # ddepth = np.abs(smooth_depth_i - smooth_depth_j)
             # ddepth_thresh = np.percentile(ddepth, 75)
-
-            # nms
+            #
+            # # nms
             # for k in range(1, ddepth.shape[0]-1):
             #     if ddepth[k] < ddepth[k-1] or ddepth[k] < ddepth[k+1]:
             #         ddepth[k] = 0
@@ -299,6 +300,7 @@ class PcEdgeDetector:
         point_cloud_mask = np.zeros(point_cloud.shape[0])
         point_cloud_mask[edge_idxs] = True
 
+        # return point_cloud_ddepth
         return point_cloud_mask
 
     @staticmethod

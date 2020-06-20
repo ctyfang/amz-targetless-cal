@@ -2,61 +2,52 @@ from calibration.camera_lidar_calibrator import *
 from calibration.utils.config import command_line_parser
 from calibration.utils.data_utils import *
 from calibration.utils.img_utils import *
+from calibration.utils.exp_utils import *
 
 import pickle
 import json
 from prettytable import PrettyTable
 
-# input_dir_list = ['/media/carter/Samsung_T5/3dv/2011_09_28/collection',
-#                   '/home/benjin/Development/Data/2011_09_26_drive_0106_sync',
-#                   'data/2011_09_26_0017']
+"""Script parameters"""
+calibrator_path = '../generated/calibrators/0928-frame34-sed-pcthresh60.pkl'
+LOG_DIR = '../generated/optimizer_logs/test'
+
+"""Experiment parameters"""
+exp_params = {'NUM_SAMPLES': 2, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
+              'ALPHA_MI': [80.0], 'ALPHA_GMM': [1.0], 'ALPHA_POINTS': [1e-3],
+              'SIGMAS': [10.0],
+              'MAX_ITERS': 50}
+
+"""Calibration directory specification"""
 calib_dir_list = ['/media/carter/Samsung_T5/3dv/2011_09_28/calibration',
                   '/home/benjin/Development/Data/2011_09_26_calib/2011_09_26',
                   'data',
                   '/home/carter/pycharm_project_534/data/calibration',
                   './data/calibration']
-cfg = command_line_parser()
-#
-# input_dir = getPath(input_dir_list)
+
 calib_dir = getPath(calib_dir_list)
-# cfg.pc_dir = input_dir
-# cfg.img_dir = input_dir
-cfg.calib_dir = calib_dir
 
-# Load calibrator with detected edges from pickled object
-with open('../output/calibrator_collection-8-0928.pkl', 'rb') as input_pkl:
-    calibrator = pickle.load(input_pkl)
-    calibrator.visualize = True
+"""Load pre-made calibrator object"""
+if os.path.exists(calibrator_path):
+    with open(calibrator_path, 'rb') as input_pkl:
+        calibrator = pickle.load(input_pkl)
+        calibrator.visualize = True
+else:
+    print('Calibrator does not exist at specified path!')
+    exit()
 
-# Ground-truth Tau
-R, T = load_lid_cal(cfg.calib_dir)
+
+"""Load ground-truth extrinsics"""
+R, T = load_lid_cal(calib_dir)
 tau_gt = calibrator.tau = calibrator.transform_to_tau(R, T)
+exp_params['tau_gt'] = tau_gt.tolist()
 
-# Experiment Parameters
-# exp_params = {'NUM_SAMPLES': 5, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
-#               'ALPHA_MI': [0.0, 0.0, 0.0], 'ALPHA_GMM': [1.0, 1.0, 1.0], 'ALPHA_POINTS': [0.0, 0.0, 0.0],
-#               'SIGMAS': [20.0, 10.0, 5.0],
-#               'MAX_ITERS': 500, 'tau_gt': tau_gt.tolist()}
-
-# exp_params = {'NUM_SAMPLES': 5, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
-#               'ALPHA_MI': [8e2, 6e1, 0.6], 'ALPHA_GMM': [1.0, 1.0, 1.0], 'ALPHA_POINTS': [1e-2, 2.5e-3, 2.5e-3],
-#               'SIGMAS': [10.0, 10.0, 10.0],
-#               'MAX_ITERS': 500, 'tau_gt': tau_gt.tolist()}
-
-exp_params = {'NUM_SAMPLES': 1, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
-              'ALPHA_MI': [8e2], 'ALPHA_GMM': [1.0], 'ALPHA_POINTS': [5e-3],
-              'SIGMAS': [10.0],
-              'MAX_ITERS': 500, 'tau_gt': tau_gt.tolist()}
-
-LOG_DIR = '../output/logs'
+"""Create log directory and save GT projections"""
 os.makedirs(LOG_DIR, exist_ok=True)
 with open(os.path.join(LOG_DIR, 'params.json'), 'w') as json_file:
     json.dump(exp_params, json_file, indent=4)
 
-# Make output directories
 os.makedirs(os.path.join(LOG_DIR, 'gt'), exist_ok=True)
-
-# Save GT Projection
 calibrator.project_point_cloud()
 for frame_idx in range(len(calibrator.img_detector.imgs)):
     img_all_points = calibrator.draw_all_points(frame=frame_idx)
@@ -65,33 +56,24 @@ for frame_idx in range(len(calibrator.img_detector.imgs)):
     cv.imwrite(os.path.join(LOG_DIR, 'gt', f'all_points_frame_{frame_idx}.jpg'), img_all_points)
     cv.imwrite(os.path.join(LOG_DIR, 'gt', f'edge_points_frame_{frame_idx}.jpg'), img_edges)
 
-
-# Errors
+"""Run the experiment"""
 tau_data = []
 tau_inits = []
 for sample_idx in range(exp_params['NUM_SAMPLES']):
     print(f'----- SAMPLE {sample_idx} -----')
-    # Reset tau to gt, sample noise, perturb
     calibrator.tau = perturb_tau(tau_gt,
                                  trans_std=exp_params['TRANS_ERR_SIGMA'],
                                  angle_std=exp_params['ANGLE_ERR_SIGMA'])
-    # calibrator.tau = tau_gt
+    compare_taus(tau_gt, calibrator.tau)
 
-    # calibrator.tau = np.asarray([ 1.1265747,  -1.20870439,  1.30531639, -0.10396132, -0.11517294, -0.24662881])
-    # print('Initial tau')
-    # print(calibrator.tau)
     calibrator.project_point_cloud()
-
-    print(tau_gt)
     tau_inits.append(calibrator.tau)
-    print("Initial Error")
-    print(extrinsics_error(tau_gt, calibrator.tau))
 
-    # Make directory for this trial
+    """Make directory for this trial"""
     os.makedirs(os.path.join(LOG_DIR, f'trial_{sample_idx}'), exist_ok=True)
     os.makedirs(os.path.join(LOG_DIR, f'trial_{sample_idx}', 'initial'), exist_ok=True)
 
-    # Save initial images
+    """Save initial images"""
     for frame_idx in range(len(calibrator.img_detector.imgs)):
         img_all_points = calibrator.draw_all_points(frame=frame_idx)
         img_edges = calibrator.draw_edge_points(frame=frame_idx,
@@ -101,51 +83,44 @@ for sample_idx in range(exp_params['NUM_SAMPLES']):
         cv.imwrite(os.path.join(LOG_DIR, f'trial_{sample_idx}', 'initial',
                                 f'edge_points_{sample_idx}_frame_{frame_idx}.jpg'), img_edges)
 
-    # Run optimizer
-    print()
-    for stage_idx, [sigma_in, alpha_mi, alpha_gmm, alpha_numpoints] \
-            in enumerate(zip(exp_params['SIGMAS'], exp_params['ALPHA_MI'], exp_params['ALPHA_GMM'], exp_params['ALPHA_POINTS'])):
+    """Run optimizer"""
+    stage_idx = 0
+    sigma_in, alpha_gmm, alpha_mi = exp_params['SIGMAS'][stage_idx], \
+                                    exp_params['ALPHA_GMM'][stage_idx], \
+                                    exp_params['ALPHA_MI'][stage_idx]
 
-        print(f'Optimization {stage_idx + 1}/{len(exp_params["SIGMAS"])}')
-        if stage_idx >= 0:
-            tau_opt, cost_history = calibrator.ls_optimize(sigma_in, alpha_gmm=alpha_gmm,
-                                                           alpha_mi=alpha_mi, alpha_numpoints=alpha_numpoints,
-                                                           maxiter=exp_params['MAX_ITERS'], translation_only=False,
-                                                           save_every=2)
-        else:
-            tau_opt, cost_history = calibrator.ls_optimize(sigma_in, alpha_gmm=alpha_gmm,
-                                                           alpha_mi=alpha_mi, alpha_numpoints=alpha_numpoints,
-                                                           maxiter=exp_params['MAX_ITERS'], translation_only=True,
-                                                           save_every=2)
+    tau_opt, cost_history = calibrator.ls_optimize(sigma_in,
+                                                   alpha_gmm=alpha_gmm,
+                                                   alpha_mi=alpha_mi,
+                                                   maxiter=exp_params['MAX_ITERS'],
+                                                   save_every=10)
 
-        calibrator.tau = tau_opt
-        calibrator.project_point_cloud()
-        print(extrinsics_error(tau_gt, tau_opt))
+    """Save results from this optimization stage"""
+    calibrator.tau = tau_opt
+    calibrator.project_point_cloud()
+    compare_taus(tau_gt, tau_opt)
 
-        # Record metrics
+    """Save projections with optimized tau"""
+    os.makedirs(os.path.join(LOG_DIR, f'trial_{sample_idx}', f'stage_{stage_idx}'), exist_ok=True)
+    plt.figure()
+    plt.title('Loss history')
+    plt.plot(range(len(cost_history)), cost_history)
+    plt.savefig(os.path.join(LOG_DIR, f'trial_{sample_idx}', f'stage_{stage_idx}', f'loss_history.png'))
+    plt.show()
+
+    calibrator.project_point_cloud()
+    for frame_idx in range(len(calibrator.img_detector.imgs)):
         os.makedirs(os.path.join(LOG_DIR, f'trial_{sample_idx}', f'stage_{stage_idx}'), exist_ok=True)
-        plt.figure()
-        plt.title('Loss history')
-        plt.plot(range(len(cost_history)), cost_history)
-        plt.savefig(os.path.join(LOG_DIR, f'trial_{sample_idx}', f'stage_{stage_idx}', f'loss_history.png'))
-        plt.show()
-
-        # Save output images
-        calibrator.project_point_cloud()
-        for frame_idx in range(len(calibrator.img_detector.imgs)):
-            os.makedirs(os.path.join(LOG_DIR, f'trial_{sample_idx}', f'stage_{stage_idx}'), exist_ok=True)
-            img_all_points = calibrator.draw_all_points(frame=frame_idx)
-            img_edges = calibrator.draw_edge_points(frame=frame_idx,
-                                                    image=calibrator.img_detector.imgs_edges[frame_idx])
-            cv.imwrite(os.path.join(LOG_DIR, f'trial_{sample_idx}', f'stage_{stage_idx}',
-                                    f'all_points_frame_{frame_idx}.jpg'), img_all_points)
-            cv.imwrite(os.path.join(LOG_DIR, f'trial_{sample_idx}', f'stage_{stage_idx}',
-                                    f'edge_points_frame_{frame_idx}.jpg'), img_edges)
+        img_all_points = calibrator.draw_all_points(frame=frame_idx)
+        img_edges = calibrator.draw_edge_points(frame=frame_idx,
+                                                image=calibrator.img_detector.imgs_edges[frame_idx])
+        cv.imwrite(os.path.join(LOG_DIR, f'trial_{sample_idx}', f'stage_{stage_idx}',
+                                f'all_points_frame_{frame_idx}.jpg'), img_all_points)
+        cv.imwrite(os.path.join(LOG_DIR, f'trial_{sample_idx}', f'stage_{stage_idx}',
+                                f'edge_points_frame_{frame_idx}.jpg'), img_edges)
 
 
-    tau_data.append(tau_opt)
-
-# Plot deviation of solutions wrt ground-truth
+"""Plot deviation of solutions wrt ground-truth"""
 tau_inits = np.asarray(tau_inits)
 np.save(os.path.join(LOG_DIR, 'tau_inits'), tau_inits)
 
