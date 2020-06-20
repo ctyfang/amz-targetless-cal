@@ -8,6 +8,7 @@ import argparse
 import glob
 import sys
 import os
+import gc
 
 import cv2
 import numpy as np
@@ -15,7 +16,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import BoundaryNorm
 from matplotlib.ticker import MaxNLocator
-from scipy.ndimage.filters import gaussian_filter,convolve
+from scipy.ndimage.filters import gaussian_filter, convolve
 
 # Path
 # ptCloud_dir = "data/2011_09_26/sync/velodyne_points/data/"
@@ -81,7 +82,7 @@ class PtCloud():
                 if ((int(pixel[0] + y[i, j]) < 0) |
                     (int(pixel[1] + x[i, j]) < 0) |
                     (int(pixel[0] + y[i, j]) >= self.cost.shape[1]) |
-                    (int(pixel[1] + x[i, j]) >= self.cost.shape[0])):
+                        (int(pixel[1] + x[i, j]) >= self.cost.shape[0])):
                     continue
                 self.cost[int(pixel[1]+x[i, j]), int(pixel[0]+y[i, j])] += \
                     int(255 * gaussian[i, j])
@@ -107,8 +108,8 @@ class PtCloud():
         blurred = gaussian_filter(gray, sigma=2, order=0, mode='reflect')
 
         ###### Gradients x and y (Sobel filters) ######
-        im_x = convolve(blurred, [[-1,0,1],[-2,0,2],[-1,0,1]]) 
-        im_y = convolve(blurred, [[1,2,1],[0,0,0],[-1,-2,-1]])
+        im_x = convolve(blurred, [[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]])
+        im_y = convolve(blurred, [[1, 2, 1], [0, 0, 0], [-1, -2, -1]])
 
         ###### gradient and direction ########
         gradient = np.sqrt(np.power(im_x, 2.0) + np.power(im_y, 2.0))
@@ -219,7 +220,7 @@ class PtCloud():
                 continue
             if ((self.pixels[0, i] < 0) | (self.pixels[1, i] < 0) |
                 (self.pixels[0, i] > hsv_image.shape[1]) |
-                (self.pixels[1, i] > hsv_image.shape[0])):
+                    (self.pixels[1, i] > hsv_image.shape[0])):
                 continue
             cv2.circle(
                 hsv_image,
@@ -231,6 +232,74 @@ class PtCloud():
                 show=False)
 
         return cv2.cvtColor(hsv_image, cv2.COLOR_HSV2BGR)
+
+
+def get_boundry(image, center, sigma):
+    top = min(3 * sigma, center[0])
+    bot = min(3*sigma+1, image.shape[0] - center[0] - 1)
+    left = min(3 * sigma, center[1])
+    right = min(3*sigma+1, image.shape[1] - center[1] - 1)
+    return top, bot, left, right
+
+
+def plot_2d(values):
+    y = range(values.shape[0]+1)
+    x = range(values.shape[1]+1)
+    levels = MaxNLocator(nbins=15).tick_values(np.amin(values),
+                                               np.amax(values))
+    cmap = plt.get_cmap('hot')
+    norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
+    fig, ax0 = plt.subplots(nrows=1)
+    plot = ax0.pcolormesh(x,
+                          y,
+                          values[::-1, :],
+                          cmap=cmap,
+                          norm=norm)
+    fig.colorbar(plot, ax=ax0)
+    ax0.set_title('pcolormesh with levels')
+    plt.axis('equal')
+    plt.show()
+
+
+def getGaussianKernel2D(sigma, visualize=False):
+    """Given sigma, get 2D kernel of dimensions (6*int(sigma), 6*int(sigma))"""
+    # sigma_int = int(sigma)
+    # x, y = np.meshgrid(np.linspace(-3 * sigma_int, 3 * sigma_int, 6 * sigma_int + 1),
+    #                    np.linspace(-3 * sigma_int, 3 * sigma_int, 6 * sigma_int + 1))
+    # dist = np.sqrt(x * x + y * y)
+    # # BUG: Square root over 2 * np.pi missing
+    # gaussian = np.exp(-(dist**2 / (2.0 * sigma**2))) / (sigma*np.sqrt(2 * np.pi))
+    # gaussian[dist > 3*sigma] = 0
+
+    gauss1d = cv2.getGaussianKernel(6*int(sigma)+1, sigma).astype(np.float32)
+    # gaussian = np.multiply(gauss1d.T, gauss1d)
+    gaussian = np.dot(gauss1d, gauss1d.T)
+
+    # BUG: I am not sure but I don't get why it's necessesary to make the
+    # values in the grid add to one? Carter doesn't go it either.
+    # gaussian = gaussian / np.sum(gaussian)
+
+    # if visualize:
+    #     levels = MaxNLocator(nbins=15).tick_values(0, np.amax(gaussian))
+    #     cmap = plt.get_cmap('hot')
+    #     norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
+    #
+    #     fig, ax0 = plt.subplots(nrows=1)
+    #     plot = ax0.pcolormesh(x,
+    #                           y,
+    #                           gaussian[::-1, :],
+    #                           cmap=cmap,
+    #                           norm=norm)
+    #     fig.colorbar(plot, ax=ax0)
+    #     ax0.set_title('pcolormesh with levels')
+    #     plt.axis('equal')
+    #     plt.show()
+    return gaussian
+
+
+def outside_image(image, pixel):
+    return (pixel[0] < 0 or pixel[0] >= image.shape[0] or
+            pixel[1] < 0 or pixel[1] >= image.shape[1])
 
 
 def get_argument():
@@ -273,6 +342,58 @@ def get_argument():
     return input_dir, output_dir, calib_dir
 
 
+def scalar_to_color(pc, score=None, min_d=0, max_d=60):
+    """
+    print Color(HSV's H value) corresponding to score
+    """
+    if score is None:
+        score = np.sqrt(
+            np.power(pc[:, 0], 2) +
+            np.power(pc[:, 1], 2) +
+            np.power(pc[:, 2], 2))
+
+    np.clip(score, 0, max_d, out=score)
+    # max distance is 120m but usually not usual
+
+    norm = plt.Normalize()
+    colors = plt.cm.jet(norm(score))
+
+    return (colors[:, :3] * 255).astype(np.uint8)
+
+
+def draw_pc_points(img, pc, R, T, K, score=None, show=False):
+    """
+    Draw all points within corresponding camera's FoV on image provided.
+    Color points according to scoring vector, if none provided, color by distance.
+    Rotation and translation from LiDAR -> Camera required.
+    """
+    new_img = img.copy()
+
+    pc_xformed = np.dot(R, pc.T)
+    pc_xformed += T.reshape((3, 1))
+    pc_projed = np.dot(K, pc_xformed)
+    pc_projed = pc_projed/pc_projed[2, :]
+    pc_pixels = pc_projed.T
+    colors = scalar_to_color(pc_xformed.T, score=score)
+
+    img_h, img_w = new_img.shape[:2]
+    for idx, [pixel, color] in enumerate(zip(pc_pixels, colors)):
+
+        if pc[idx, 0] <= 0:
+            continue
+
+        if 0 <= pixel[1] <= img_h and 0 <= pixel[0] <= img_w:
+            cv2.circle(new_img, (pixel[0].astype(np.int), pixel[1].astype(np.int)), 1, color.tolist(), -1)
+            # new_img[pixel[1].astype(np.int), pixel[0].astype(np.int), :] = color
+
+    if show:
+        cv2.imshow('Projected Point Cloud on Image', new_img)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+    return new_img
+
+
 def main():
     '''
     MAIN() function.
@@ -301,6 +422,23 @@ def main():
         cv2.destroyAllWindows()
         return
 
+    def scalar_to_color(self, score=None, min_d=0, max_d=60, frame=-1):
+        """
+        print Color(HSV's H value) corresponding to score
+        """
+        if score is None:
+            score = np.sqrt(
+                np.power(self.points_cam_frame[frame][:, 0], 2) +
+                np.power(self.points_cam_frame[frame][:, 1], 2) +
+                np.power(self.points_cam_frame[frame][:, 2], 2))
+
+        np.clip(score, 0, max_d, out=score)
+        # max distance is 120m but usually not usual
+
+        norm = plt.Normalize()
+        colors = plt.cm.jet(norm(score))
+
+        return (colors[:, :3] * 255).astype(np.uint8)
 
 if __name__ == '__main__':
     main()

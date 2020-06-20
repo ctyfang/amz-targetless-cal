@@ -1,30 +1,33 @@
 import numpy as np
 from scipy.spatial import ckdtree
-import time
-from time import sleep
+import matplotlib.pyplot as plt
 import matplotlib
 from matplotlib import cm as cm
 import open3d as o3d
+from sklearn.cluster import KMeans
+
+import time
+import os
+from glob import glob
 
 
 class PcEdgeDetector:
 
     def __init__(self, cfg, visualize=True):
-        self.pcs = self.load_pc(cfg.pc_dir, cfg.frames)
+        self.pcs, self.reflectances = self.load_pcs(cfg.pc_dir,
+                                                    cfg.frames,
+                                                    subsample=cfg.pc_subsample)
 
-        self.pcs_edge_idxs = None
-        self.pcs_edge_scores = None
-        self.pcs_max_edge_score = None
-        self.pcs_nn_sizes = None
+        self.pcs_edge_idxs = []
+        self.pcs_edge_masks = []
+        self.pcs_edge_scores = []
 
         self.PC_ED_SCORE_THR = cfg.pc_ed_score_thr
         self.PC_ED_RAD_NN = cfg.pc_ed_rad_nn
         self.PC_ED_NUM_NN = cfg.pc_ed_num_nn
+        self.PC_NUM_CHANNELS = 64
 
-        self.pc_detect(self.PC_ED_SCORE_THR, self.PC_ED_NUM_NN,
-                       self.PC_ED_RAD_NN, visualize=visualize)
-
-    def pc_detect(self, thresh=0.6, num_nn=100, rad_nn=0.1, visualize=False):
+    def pc_detect(self, pcs_cam_frame, thresh=0.6, num_nn=100, rad_nn=0.1, visualize=False):
         """
         Compute edge scores for pointcloud
         Get edge points via thresholding
@@ -32,83 +35,116 @@ class PcEdgeDetector:
 
         # TODO: Be able to process several point clouds
         # Init outputs
-        num_points = self.pcs.shape[0]
-        center_scores = np.zeros(num_points)
-        planar_scores = np.zeros(num_points)
-        self.pcs_edge_scores = np.zeros(num_points)
-        self.pcs_nn_sizes = np.zeros(num_points)
+        for pc, pc_cam_frame in zip(self.pcs, pcs_cam_frame):
+            num_points = pc.shape[0]
+            center_scores = np.zeros(num_points)
+            planar_scores = np.zeros(num_points)
 
-        start_t = time.time()
-        kdtree = ckdtree.cKDTree(self.pcs)
-        for point_idx in range(num_points):
-            curr_xyz = self.pcs[point_idx, :]
+            start_t = time.time()
+            kdtree = ckdtree.cKDTree(pc)
+            for point_idx in range(num_points):
+                curr_xyz = pc[point_idx, :]
 
-            neighbor_d1, neighbor_i1 = kdtree.query(curr_xyz, num_nn)
-            neighbor_i2 = kdtree.query_ball_point(curr_xyz, rad_nn)
-            # remove duplicates
-            neighbor_i2 = list(set(neighbor_i2) - set(neighbor_i1))
-            neighbor_d2 = np.linalg.norm(self.pcs[neighbor_i2, :] - curr_xyz,
-                                         ord=2,
-                                         axis=1)
-            neighbor_i = np.append(neighbor_i1, neighbor_i2).astype(np.int)
-            neighbor_d = np.append(neighbor_d1, neighbor_d2)
+                neighbor_d1, neighbor_i1 = kdtree.query(curr_xyz, num_nn)
+                neighbor_i2 = kdtree.query_ball_point(curr_xyz, rad_nn)
+                # remove duplicates
+                neighbor_i2 = list(set(neighbor_i2) - set(neighbor_i1))
+                neighbor_d2 = np.linalg.norm(pc[neighbor_i2, :] - curr_xyz,
+                                             ord=2,
+                                             axis=1)
+                neighbor_i = np.append(neighbor_i1, neighbor_i2).astype(np.int)
+                neighbor_d = np.append(neighbor_d1, neighbor_d2)
 
-            self.pcs_nn_sizes[point_idx] = neighbor_d.shape[0]
-            neighborhood_xyz = self.pcs[neighbor_i.tolist(), :]
+                neighborhood_xyz = pc[neighbor_i.tolist(), :]
 
-            center_score = self.compute_centerscore(neighborhood_xyz, curr_xyz,
-                                                    np.max(neighbor_d))
-            planarity_score = self.compute_planarscore(
-                neighborhood_xyz, curr_xyz)
+                center_score = self.compute_centerscore(neighborhood_xyz,
+                                                        curr_xyz,
+                                                        np.max(neighbor_d))
+                planarity_score = self.compute_planarscore(
+                    neighborhood_xyz, curr_xyz)
 
-            center_scores[point_idx] = center_score
-            planar_scores[point_idx] = planarity_score
+                center_scores[point_idx] = center_score
+                planar_scores[point_idx] = planarity_score
 
-        # Combine two edge scores
-        # (Global normalization, local neighborhood size normalization)
-        max_center_score = np.max(center_scores)
-        max_planar_score = np.max(planar_scores)
-        self.pcs_edge_scores = 0.5 * \
-            (center_scores / max_center_score
-             + planar_scores / max_planar_score)
+            # Combine three edge scores
+            # (Global normalization, local neighborhood size normalization)
+            pc_edge_scores_1 = center_scores
+            pc_edge_scores_1 = (pc_edge_scores_1 - pc_edge_scores_1.min())/(pc_edge_scores_1.max() - pc_edge_scores_1.min())
 
-        print(f"Total pc scoring time:{time.time() - start_t}")
+            pc_edge_scores_2 = planar_scores
+            pc_edge_scores_2 = (pc_edge_scores_2 - pc_edge_scores_2.min())/(pc_edge_scores_2.max() - pc_edge_scores_2.min())
+            pc_edge_scores = pc_edge_scores_1*pc_edge_scores_2
 
-        # Remove all points with an edge score below the threshold
-        score_mask = self.pcs_edge_scores > thresh
-        self.pcs_edge_idxs = np.argwhere(score_mask)
-        self.pcs_edge_idxs = np.squeeze(self.pcs_edge_idxs)
+            # Calculate the depth discontinuity score
+            depth_discontinuity_scores = self.compute_depth_discontinuity_score(
+                pc, self.PC_NUM_CHANNELS)
+            pc_edge_scores_3 = depth_discontinuity_scores
+            pc_edge_scores_3 = (pc_edge_scores_3 - pc_edge_scores_3.min())/(pc_edge_scores_3.max() - pc_edge_scores_3.min())
+            pc_edge_scores = pc_edge_scores*pc_edge_scores_3
 
-        # Exclude boundary points in final thresholding
-        # and max score calculation
-        pc_boundary_idxs = self.get_first_and_last_channel_idxs(self.pcs)
-        boundary_mask = [
-            (edge_idx not in pc_boundary_idxs) for edge_idx in self.pcs_edge_idxs
-        ]
-        self.pcs_edge_idxs = self.pcs_edge_idxs[boundary_mask]
+            # NMS
+            points_suppressed = 0
+            for point_idx in range(num_points):
+                curr_score = pc_edge_scores[point_idx]
+                neighbor_i = kdtree.query_ball_point(curr_xyz, 0.10)
+                neighbor_scores = pc_edge_scores[neighbor_i]
 
-        pc_nonbound_edge_scores = np.delete(self.pcs_edge_scores,
-                                            pc_boundary_idxs,
-                                            axis=0)
-        self.pcs_max_edge_score = np.max(pc_nonbound_edge_scores)
+                if (neighbor_scores > curr_score).any():
+                    pc_edge_scores[point_idx] = 0
+                    points_suppressed += 1
+
+            self.pcs_edge_scores.append(pc_edge_scores)
+            print(f"Total pc scoring time:{time.time() - start_t}")
+
+            # Remove all points with an edge score below the threshold
+            thresh = np.percentile(pc_edge_scores, 60)
+            self.pcs_edge_masks.append(self.pcs_edge_scores[-1] > thresh)
+            # Exclude boundary points in final thresholding
+            pc_boundary_idxs = self.get_first_and_last_channels_idxs(pc)
+            self.pcs_edge_masks[-1][pc_boundary_idxs] = False
+            # Exclude points that in the camera frame have a euclidean distance greater than a treshold
+            outside_point_idxs = self.get_points_outside_radius(
+                pc_cam_frame, radius=25)
+            self.pcs_edge_masks[-1][outside_point_idxs] = False
+
+            self.pcs_edge_idxs.append(
+                np.squeeze(np.argwhere(self.pcs_edge_masks[-1])))
 
         if visualize:
-            self.pc_visualize_edges(
-                self.pcs, self.pcs_edge_idxs, self.pcs_edge_scores)
+            for idx in range(len(self.pcs)):
+                self.pc_visualize_edges(self.pcs[idx], self.pcs_edge_idxs[idx],
+                                        self.pcs_edge_scores[idx])
 
     @staticmethod
-    def load_pc(path, frames):
-        if len(frames) <= 1:
-            return np.fromfile(str(path) + '/velodyne_points/data/' +
-                               str(frames[0]).zfill(10) + '.bin',
-                               dtype=np.float32).reshape(-1, 4)[:, :3]
+    def load_pcs(path, frames, subsample=1.0):
+        pcs = []
+        reflectances = []
+
+        if frames == -1:
+            frame_paths = sorted(
+                glob(os.path.join(path, 'velodyne_points', 'data', '*.bin')))
         else:
-            pcs = []
-            for frame in frames:
-                pcs.append(np.fromfile(str(path) + '/velodyne_points/data/' +
-                                       str(frame).zfill(10) + '.bin',
-                                       dtype=np.float32).reshape(-1, 4)[:, :3])
-            return pcs
+            frame_paths = [os.path.join(path, 'velodyne_points', 'data', str(
+                frame).zfill(10)) + ".bin" for frame in frames]
+
+        for path in frame_paths:
+            _, ext = os.path.splitext(path)
+            if ext == '.bin':
+                curr_pc = (np.fromfile(path,
+                                       dtype=np.float32).reshape(-1, 4))[:, :]
+            elif ext == '.txt':
+                curr_pc = (np.loadtxt(path,
+                                       dtype=np.float32).reshape(-1, 4))[:, :]
+
+            else:
+                continue
+
+            pc = curr_pc[:int(subsample * curr_pc.shape[0]), :3]
+            refl = curr_pc[:int(subsample * curr_pc.shape[0]), 3]
+            pcs.append(pc)
+            reflectances.append(refl)
+
+        return pcs, reflectances
 
     @staticmethod
     def compute_centerscore(nn_xyz, center_xyz, max_nn_d):
@@ -117,7 +153,7 @@ class PcEdgeDetector:
         #              distance in the neighborhood, as done in Kang 2019.
 
         centroid = np.mean(nn_xyz, axis=0)
-        norm_dist = np.linalg.norm(center_xyz - centroid)/max_nn_d
+        norm_dist = np.linalg.norm(center_xyz - centroid) / max_nn_d
         return norm_dist
 
     @staticmethod
@@ -132,17 +168,146 @@ class PcEdgeDetector:
         n_points = centered_xyz.shape[0]
         s = np.zeros((3, 3))
         for i in range(n_points):
-            s += np.dot(centered_xyz[i, :].T, centered_xyz[i, :])
+            test = np.dot(centered_xyz[i, :].reshape((3, 1)), centered_xyz[i, :].reshape((1, 3)))
+            s += test
         s /= n_points
 
         # Compute planarity of neighborhood using SVD (Xia & Wang 2017)
         _, eig_vals, _ = np.linalg.svd(s)
-        planarity = 1 - (eig_vals[1] - eig_vals[2])/eig_vals[0]
+        planarity = 1 - (eig_vals[1] - eig_vals[2]) / eig_vals[0]
 
         return planarity
 
     @staticmethod
-    def get_first_and_last_channel_idxs(pc, hor_res=0.2):
+    def compute_depth_discontinuity_score(point_cloud, num_channels):
+        # Description: Compute vertical edges using depth discontinuity as the edge indicator. First
+        #              the points of the point cloud are sorted according to their polar angle to
+        #              group the points into their corresponding channels. Then the points of the
+        #              channels are sorted according to their azimuth angle. After calculating the depth
+        #              of each point, the change of depth between consecutive points in the sorted
+        #              channel is calculated. If this change is above a threshold for a certain point,
+        #              it is considered an edge.
+        # Return:      A binary mask indicating edges in the point cloud.
+
+        # Calculate the polar angle for every point
+        polar_angle = 180 * np.arctan2(point_cloud[:, 2], np.sqrt(
+            np.square(point_cloud[:, 0]) + np.square(point_cloud[:, 1]))) / np.pi
+
+        # Calculate 64 cluster means
+        max_polar_angle = np.max(polar_angle)
+        min_polar_angle = np.min(polar_angle)
+        # Calculate an initial guess
+        init_guess = np.linspace(
+            min_polar_angle, max_polar_angle, num=num_channels)
+        kmeans = KMeans(n_clusters=num_channels, init=init_guess.reshape(-1, 1)
+                        ).fit(polar_angle.reshape(-1, 1))
+
+        # Fill list with the idxs of edges
+        edge_idxs = []
+
+        # Return depth discontinuity scores
+        point_cloud_ddepth = np.zeros(point_cloud.shape[0])
+
+        for channel in range(num_channels):
+            # Binary mask for the points of the current channel
+            current_channel_mask = (kmeans.labels_ == channel)
+            # Indices of the points of the current channel
+            current_channel_idxs = np.argwhere(current_channel_mask)
+            # Array of the points of the current channel
+            current_channel_points = point_cloud[current_channel_mask]
+            # Array that assigns every point in current_channel_points an index
+            current_channel_order = np.arange(current_channel_points.shape[0])
+
+            # Calculate the azimuth angles of the points of the channel
+            azimuth_angle = 180 * \
+                np.arctan2(
+                    current_channel_points[:, 1], current_channel_points[:, 0]) / np.pi
+
+            # Find the array that sorts the points of the current channel according to its azimuth angle
+            sort_by_azimuth_angle = np.argsort(azimuth_angle)
+
+            azimuth_angle_sorted = azimuth_angle[sort_by_azimuth_angle]
+            current_channel_points_sorted = current_channel_points[sort_by_azimuth_angle]
+            current_channel_order = current_channel_order[sort_by_azimuth_angle]
+
+            # Visualize current ring colored by azimuth value
+            VISUALIZE_CURRENT_RING = False
+            if VISUALIZE_CURRENT_RING:
+                visualize_xyz_scores(
+                    current_channel_points_sorted, azimuth_angle_sorted, cmap=cm.summer)
+
+            # Calculate the depth of each point
+            depth = np.linalg.norm(current_channel_points_sorted, axis=1)
+
+            # Ben method
+            # rml: depth of right point minus depth of left point
+            delta_depth_rml = depth - np.roll(depth, -1)
+            # lmr: depth of left point minus depth of right point
+            delta_depth_lmr = depth - np.roll(depth, +1)
+
+            # Visualize depth, and delta depth against azimuth_angle_sorted
+            VISUALIZE_DELTA_DEPTH_AGAINST_AZIMUTH_ANGLE = False
+            if VISUALIZE_DELTA_DEPTH_AGAINST_AZIMUTH_ANGLE:
+                fig, ax = plt.subplots(figsize=(20, 10))
+                ax.scatter(
+                    azimuth_angle_sorted[:300], depth[:300], s=1, alpha=0.75)
+                ax.scatter(azimuth_angle_sorted[:300],
+                           delta_depth_lmr[:300], s=1, c='red')
+                plt.tight_layout(pad=3.0)
+                plt.show()
+
+            edges_filter = np.logical_or(
+                delta_depth_rml < -0.5, delta_depth_lmr < -0.5)
+
+            # # Wang method
+            # a = 5
+            # smooth_depth_i = np.zeros(depth.shape)
+            # smooth_depth_j = np.zeros(depth.shape)
+            # for k in range(-a, a+1):
+            #     smooth_depth_i += np.roll(depth, k)/(2*a+1)
+            #     smooth_depth_j += np.roll(depth, k-1)/(2*a+1)
+            # ddepth = np.abs(smooth_depth_i - smooth_depth_j)
+            # ddepth_thresh = np.percentile(ddepth, 75)
+            #
+            # # nms
+            # for k in range(1, ddepth.shape[0]-1):
+            #     if ddepth[k] < ddepth[k-1] or ddepth[k] < ddepth[k+1]:
+            #         ddepth[k] = 0
+            # point_cloud_ddepth[current_channel_idxs] = np.expand_dims(ddepth, 1)
+            # edges_filter = ddepth > ddepth_thresh
+
+            current_edges = current_channel_points_sorted[edges_filter]
+
+            # Get the idxs of the points in the current channel that are edges
+            current_channel_order = current_channel_order[edges_filter]
+
+            # Get the idxs of the points in the point cloud that are edges
+            current_ring_edge_idxs = current_channel_idxs[current_channel_order]
+
+            # Visualize edges in current ring
+            VISUALIZE_EDGES_IN_RING = False
+            if VISUALIZE_EDGES_IN_RING:
+                visualize_xyz_scores(
+                    current_channel_points_sorted, edges_filter, cmap=cm.summer)
+
+            # Delete current edges if too many are detected
+            if current_edges.shape[0] > 500:
+                continue
+
+            edge_idxs.extend(current_ring_edge_idxs.tolist())
+
+        # Get the binary mask indicating the edge points in the point cloud
+        point_cloud_mask = np.zeros(point_cloud.shape[0])
+        point_cloud_mask[edge_idxs] = True
+
+        # return point_cloud_ddepth
+        return point_cloud_mask
+
+    @staticmethod
+    def get_first_and_last_channels_idxs(pc, ch_to_remove=3, hor_res=0.2):
+        """
+        Returns numpy array of the point indices that are in the first and last channels
+        """
         x = pc[:, 0]
         y = pc[:, 1]
         z = pc[:, 2]
@@ -150,15 +315,27 @@ class PcEdgeDetector:
         polar_angle = np.arctan2(np.sqrt(np.square(x) + np.square(y)), z)
 
         # Find the indices of the 360 / horizontal_resolution smallest/largest polar angles
-        size_channel = 2 * int(360 / hor_res)
-        neg_mask_smallest_angle = np.argpartition(
-            polar_angle, size_channel)[:size_channel]
-        neg_mask_largest_angle = np.argpartition(
-            polar_angle, -size_channel)[-size_channel:]
+        size_channel = 3 * int(360 / hor_res)
+        neg_mask_smallest_angle = np.argpartition(polar_angle,
+                                                  size_channel)[:size_channel]
+        neg_mask_largest_angle = np.argpartition(polar_angle,
+                                                 -size_channel)[-size_channel:]
         boundary_idxs = np.concatenate(
             (neg_mask_largest_angle, neg_mask_smallest_angle), axis=0)
 
         return np.unique(boundary_idxs)
+
+    @staticmethod
+    def get_points_outside_radius(pc, radius=20):
+        """
+        Return point indices of points outside radius
+        """
+        distance = np.sqrt(
+            np.power(pc[:, 0], 2) +
+            np.power(pc[:, 1], 2) +
+            np.power(pc[:, 2], 2))
+
+        return np.argwhere(distance > radius)
 
     def pc_visualize_edges(self, xyz, edge_idxs, edge_scores):
         v_min = np.min(edge_scores)
@@ -166,24 +343,25 @@ class PcEdgeDetector:
 
         edge_points = xyz[edge_idxs, :]
         edge_scores = edge_scores[edge_idxs]
-        self.visualize_xyz_scores(
-            edge_points, edge_scores, vmin=v_min, vmax=v_max)
+        self.visualize_xyz_scores(edge_points,
+                                  edge_scores,
+                                  vmin=v_min,
+                                  vmax=v_max)
 
     @staticmethod
-    def visualize_xyz_scores(xyz, scores, vmin=None, vmax=None):
+    def visualize_xyz_scores(xyz, scores, vmin=None, vmax=None, cmap=cm.tab20c):
         if vmin is None:
             vmin = np.min(scores)
         if vmax is None:
             vmax = np.max(scores)
 
-        norm = matplotlib.colors.Normalize(
-            vmin=vmin, vmax=vmax, clip=True)
-        mapper = cm.ScalarMappable(norm=norm, cmap=cm.jet)
-        colors = np.asarray([mapper.to_rgba(x)[:3] for x in scores])
+        norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax, clip=True)
+        mapper = cm.ScalarMappable(norm=norm, cmap=cmap)
+        colors = np.asarray(mapper.to_rgba(scores))
 
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(xyz)
-        pcd.colors = o3d.utility.Vector3dVector(colors)
+        pcd.colors = o3d.utility.Vector3dVector(colors[:, :3])
 
         vis = o3d.visualization.Visualizer()
         vis.create_window()
