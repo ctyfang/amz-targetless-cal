@@ -9,16 +9,15 @@ from datetime import datetime
 
 from scipy.ndimage.filters import gaussian_filter, convolve
 from scipy.optimize import least_squares, minimize, root, differential_evolution, basinhopping
-from scipy.stats import multivariate_normal
+from scipy.stats import multivariate_normal, gaussian_kde, entropy, norm
 from sklearn.feature_selection import mutual_info_regression
 from sklearn.metrics import mutual_info_score
 from scipy.linalg import expm
-from scipy.stats import norm
 from matplotlib.colors import BoundaryNorm
 from matplotlib.ticker import MaxNLocator
 import scipy.optimize as optimize
-from scipy.stats import gaussian_kde, entropy
 from KDEpy import FFTKDE
+from scipy.interpolate import griddata
 
 from calibration.img_edge_detector import ImgEdgeDetector
 from calibration.pc_edge_detector import PcEdgeDetector
@@ -73,7 +72,7 @@ class CameraLidarCalibrator:
     @staticmethod
     def transform_to_tau(R, T):
         r_vec, _ = cv2.Rodrigues(R)
-        return np.hstack((r_vec.T, T.T)).reshape(6, )
+        return np.hstack((r_vec.T, T.T)).reshape(6,)
 
     @staticmethod
     def tau_to_transform(tau):
@@ -164,8 +163,9 @@ class CameraLidarCalibrator:
             self.projection_mask[frame]]
 
         for pixel, color in zip(projected_points_valid, colors_valid):
-            cv2.circle(image, (pixel[0].astype(np.int), pixel[1].astype(
-                np.int)), 1, color.tolist(), -1)
+            cv2.circle(image,
+                       (pixel[0].astype(np.int), pixel[1].astype(np.int)), 1,
+                       color.tolist(), -1)
             # image[pixel[1].astype(np.int), pixel[0].astype(np.int), :] = color
 
         if show:
@@ -187,17 +187,48 @@ class CameraLidarCalibrator:
 
         for pixel, reflectance in zip(projected_points_valid,
                                       reflectance_values):
-            refl_img[pixel[1].astype(np.int), pixel[0].astype(
-                np.int)] = reflectance
+            refl_img[pixel[1].astype(np.int),
+                     pixel[0].astype(np.int)] = reflectance
 
         cv.imshow('Projected Point Cloud Reflectance Image', refl_img)
-        cv.imshow('Grayscale img', cv.cvtColor(
-            self.img_detector.imgs[frame], cv.COLOR_BGR2GRAY))
+        cv.imshow('Grayscale img',
+                  cv.cvtColor(self.img_detector.imgs[frame], cv.COLOR_BGR2GRAY))
         cv.waitKey(0)
         cv.destroyAllWindows()
 
-    def draw_edge_points(self, score=None, image=None, append_string='',
-                         frame=-1, save=False, show=False):
+    def draw_depth_image(self, score=None, img=None, frame=-2, show=False):
+        img_h, img_w = self.img_detector.imgs[frame].shape[:2]
+        image = np.zeros((img_h, img_w), dtype=np.float32)
+
+        grid_x, grid_y = np.mgrid[0:img_w, 0:img_h]
+
+        depth = np.linalg.norm(self.pc_detector.pcs[frame], ord=2, axis=1)
+        depth_valid = depth[self.projection_mask[frame]]
+
+        # depth_valid = self.pc_detector.reflectances[frame][
+        #     self.projection_mask[frame]] * 255
+        projected_points_valid = self.projected_points[frame][
+            self.projection_mask[frame]]
+
+        depth_img = griddata(projected_points_valid,
+                             depth_valid, (grid_x, grid_y),
+                             method='linear').T
+
+        depth_img = (depth_img * 255 / np.nanmax(depth_img)).astype(np.uint8)
+        if show:
+            cv.imshow('Depth image with linear interpolation', depth_img)
+            cv.waitKey(0)
+            cv.destroyAllWindows()
+
+        return depth_img
+
+    def draw_edge_points(self,
+                         score=None,
+                         image=None,
+                         append_string='',
+                         frame=-1,
+                         save=False,
+                         show=False):
         """
         Draw only edge points within corresponding camera's FoV on image provided.
         """
@@ -222,8 +253,9 @@ class CameraLidarCalibrator:
 
         if save:
             now = datetime.now()
-            cv.imwrite(append_string +
-                       now.strftime("%y%m%d-%H%M%S-%f") + '.jpg', image)
+            cv.imwrite(
+                append_string + now.strftime("%y%m%d-%H%M%S-%f") + '.jpg',
+                image)
 
         if show:
             cv.imshow('Projected Edge Points on Image', image)
@@ -345,19 +377,19 @@ class CameraLidarCalibrator:
     @staticmethod
     def gaussian_pdf(u, v, sigma, mu=0):
         """Compute P(d) according to the 1d gaussian pdf"""
-        d = np.sqrt(u ** 2 + v ** 2)
-        return (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp(-(d ** 2) /
-                                                           (2 * (sigma ** 2)))
+        d = np.sqrt(u**2 + v**2)
+        return (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp(-(d**2) /
+                                                           (2 * (sigma**2)))
 
     @staticmethod
     def gaussian_pdf_deriv(u, v, sigma, mu=0, wrt='u'):
-        d = np.sqrt(u ** 2 + v ** 2)
+        d = np.sqrt(u**2 + v**2)
         if wrt == 'u':
             factor = u
         else:
             factor = v
         return (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp(
-            -(d ** 2) / (2 * (sigma ** 2))) * (-factor / sigma)
+            -(d**2) / (2 * (sigma**2))) * (-factor / sigma)
 
     def compute_gradient(self, sigma_in):
         """Assuming lidar edge points have already been projected, compute gradient at current tau
@@ -431,10 +463,10 @@ class CameraLidarCalibrator:
                             x_c, y_c, z_c = self.points_cam_frame[pt_idx, :]
                             du_dxc = f_x / z_c
                             du_dyc = 0
-                            du_dzc = -(f_x * x_c) / (z_c ** 2)
+                            du_dzc = -(f_x * x_c) / (z_c**2)
                             dv_dxc = 0
                             dv_dyc = f_y / z_c
-                            dv_dzc = -(f_y * y_c) / (z_c ** 2)
+                            dv_dzc = -(f_y * y_c) / (z_c**2)
 
                             du_dtau = ((du_dxc * dxc_dtau) +
                                        (du_dyc * dyc_dtau) +
@@ -460,8 +492,8 @@ class CameraLidarCalibrator:
             grayscale_img[projected_points_valid[:, 1].astype(np.uint),
                           projected_points_valid[:, 0].astype(np.uint)], 1)
         reflectance_vector = np.expand_dims(
-            (self.pc_detector.reflectances[frame][
-                 self.projection_mask[frame]] * 255.0), 1).astype(np.int)
+            (self.pc_detector.reflectances[frame][self.projection_mask[frame]] *
+             255.0), 1).astype(np.int)
 
         if len(reflectance_vector) > 0 and len(grayscale_vector) > 0:
 
@@ -470,10 +502,10 @@ class CameraLidarCalibrator:
             grid_data = np.vstack([grid_y.ravel(), grid_x.ravel()])
 
             # # Using KDEpy
-            gray_probs = FFTKDE(bw='silverman').fit(
-                grayscale_vector).evaluate(range(-1, 257))
-            refl_probs = FFTKDE(bw='silverman').fit(
-                reflectance_vector).evaluate(range(-1, 257))
+            gray_probs = FFTKDE(bw='silverman').fit(grayscale_vector).evaluate(
+                range(-1, 257))
+            refl_probs = FFTKDE(
+                bw='silverman').fit(reflectance_vector).evaluate(range(-1, 257))
             joint_probs = FFTKDE().fit(joint_data).evaluate(grid_data.T)
 
             gray_probs /= np.sum(gray_probs)
@@ -501,8 +533,8 @@ class CameraLidarCalibrator:
             # TODO: Use camera frame pointcloud for sigma scaling
             if sigma_scaling:
                 sigma = (
-                        sigma_in / np.linalg.norm(
-                    self.points_cam_frame[frame][idx, :], 2))
+                    sigma_in /
+                    np.linalg.norm(self.points_cam_frame[frame][idx, :], 2))
             else:
                 sigma = sigma_in
 
@@ -532,7 +564,7 @@ class CameraLidarCalibrator:
                 self.pc_detector.pcs_edge_scores[frame][idx]
 
             kernel_patch = gauss2d[3 * int(sigma) - top:3 * int(sigma) + bot,
-                           3 * int(sigma) - left:3 * int(sigma) + right]
+                                   3 * int(sigma) - left:3 * int(sigma) + right]
 
             cost_patch = np.multiply(edge_scores_patch, kernel_patch)
 
@@ -544,12 +576,16 @@ class CameraLidarCalibrator:
         gc.collect()
         return -np.sum(cost_map)
 
-    def ls_optimize(self, sigma_in, method='lm', alpha_gmm=1, alpha_mi=8e2,
-                    maxiter=600, save_every=100):
+    def ls_optimize(self,
+                    sigma_in,
+                    method='lm',
+                    alpha_gmm=1,
+                    alpha_mi=8e2,
+                    maxiter=600,
+                    save_every=100):
         """Optimize cost over all image-scan pairs using mutual info and gmm.
             Scale the contributions from two loss sources using alphas."""
         cost_history = []
-
         """Optimization config"""
         self.tau_ord_mags = np.log10(np.abs(self.tau))
         self.tau_ord_mags[3:] += 1
@@ -564,7 +600,6 @@ class CameraLidarCalibrator:
         def loss_callback(xk, state=None):
             # print(xk*self.tau_ord_mags)
             self.num_iterations += 1
-
             """Monitor number of points being projected onto the image"""
             total_valid_points = 0
             for frame_idx in range(len(self.projection_mask)):
@@ -601,19 +636,21 @@ class CameraLidarCalibrator:
                 #                        options=opt_options,
                 #                        callback=loss_callback)
 
-                opt_results = basinhopping(loss_scaled, self.tau,
+                opt_results = basinhopping(loss_scaled,
+                                           self.tau,
                                            niter=20,
                                            T=10,
                                            stepsize=0.05,
                                            callback=bh_callback,
                                            minimizer_kwargs={
                                                'method': 'Nelder-Mead',
-                                               'args':(
-                                               self, sigma_in, alpha_mi,
-                                               alpha_gmm, cost_history,
-                                               self.tau_ord_mags, False),
+                                               'args':
+                                                   (self, sigma_in, alpha_mi,
+                                                    alpha_gmm, cost_history,
+                                                    self.tau_ord_mags, False),
                                                'options': opt_options,
-                                               'callback': loss_callback})
+                                               'callback': loss_callback
+                                           })
                 # self.tau = opt_results.x
                 self.tau = opt_results.x * self.tau_ord_mags
 
@@ -629,8 +666,11 @@ class CameraLidarCalibrator:
         print(f"NL optimizer time={time.time() - start}")
         return self.tau, cost_history
 
-    def batch_optimization(self, sigma_in,
-                           method='lm', alpha_gmm=1, alpha_mi=30):
+    def batch_optimization(self,
+                           sigma_in,
+                           method='lm',
+                           alpha_gmm=1,
+                           alpha_mi=30):
         cost_history = []
 
         def loss(tau_init, calibrator, sigma_in, cost_history):
@@ -685,18 +725,18 @@ def loss_scaled(tau, calibrator, sigma_in, alpha_mi, alpha_gmm, cost_history,
     cost_mi = cost_gmm = 0
     for frame_idx in range(num_frames):
         cost_mi += alpha_mi * calibrator.compute_mi_cost(frame_idx)
-        cost_gmm += alpha_gmm * calibrator.compute_conv_cost(sigma_in,
-                                                             frame_idx)
+        cost_gmm += alpha_gmm * calibrator.compute_conv_cost(
+            sigma_in, frame_idx)
 
     total_cost = (cost_mi / num_frames) + (cost_gmm / num_frames)
     cost_history.append(total_cost)
     # print([cost_mi, cost_gmm])
 
-
     if return_components:
         return [cost_mi / num_frames, cost_gmm / num_frames]
     else:
         return cost_history[-1]
+
 
 class BadProjection(Exception):
     """Bad Projection exception"""
