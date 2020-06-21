@@ -45,18 +45,30 @@ def getPath(list_of_paths):
     sys.exit()
 
 
-def load_from_bin(bin_path):
+def load_from_bin(bin_path, incl_refl=False):
     # load point cloud from a binary file
     obj = np.fromfile(bin_path, dtype=np.float32).reshape(-1, 4)
-    # ignore reflectivity info
-    return obj[:, :3]
+
+    if incl_refl:
+        return obj
+    else:
+        return obj[:, :3]
 
 
-def load_from_csv(csv_path, delimiter=',', skip_header=0):
+def load_from_csv(path, delimiter=',', skip_header=0, incl_refl=False):
     # load point cloud from a csv file
-    obj = np.genfromtxt(csv_path, delimiter=delimiter, skip_header=skip_header)
-    # ignore unnecessary indices in first column
-    return obj[:, 1:4]
+    _, ext = os.path.splitext(path)
+    if ext == '.csv':
+        obj = np.genfromtxt(path, delimiter=delimiter,
+                            skip_header=skip_header)
+        return obj[:, 1:4]
+
+    elif ext == '.txt':
+        obj = np.genfromtxt(path, skip_header=skip_header)
+        return obj[:, :]
+
+    else:
+        print("Unsupported extension for pc data.")
 
 
 def depth_color(val, min_d=0, max_d=120):

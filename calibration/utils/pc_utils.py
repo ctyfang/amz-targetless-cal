@@ -5,6 +5,7 @@ from scipy.spatial import ckdtree
 import matplotlib
 from matplotlib import pyplot as plt
 from matplotlib import cm as cm
+import cv2 as cv
 
 from copy import deepcopy
 from random import randint
@@ -167,3 +168,60 @@ def custom_draw_geometry_with_key_callbacks(pcd):
     key_to_callback[ord("C")] = save_camera_model
     o3d.visualization.draw_geometries_with_key_callbacks(
         [pcd], key_to_callback)
+
+
+def gen_reflectance_image(pc, R, T, K, img_dims, fill=False, fill_rad=3):
+    """Given a pointcloud, rotation matrix, translation vector, and camera
+     intrinsics, generate the reflectance image with specified image dimensions.
+     image_dims specified as (h, w). PC is a numpy array of shape (N, 4)
+     where each row is [X, Y, Z, Reflectance] with reflectance in range [0, 1].
+
+     Return the reflectance image, and a mask image. Mask image indicates the
+     areas with pixels.
+     """
+
+    R = R.reshape((3, 3))
+    T = T.reshape((3, 1))
+    K = K.reshape((3, 3))
+
+    """Remove points behind the vehicle"""
+    pc = pc[pc[:, 0] > 0, :]
+
+    """Separate position from reflectance"""
+    refl = pc[:, 3]
+    pc = pc[:, :3]
+
+    """Transform from LiDAR to camera frame, project onto image"""
+    pc_cam = np.matmul(R, np.transpose(pc)) + T
+    pc_pixels = np.matmul(K, pc_cam)
+    pc_pixels /= pc_pixels[2, :]
+    pc_pixels = np.transpose(pc_pixels[:2, :]) # Reshape to Nx2
+
+    """Remove pixels outside image bounds"""
+    x_mask = np.logical_and(pc_pixels[:, 0] >= 0,
+                            pc_pixels[:, 0] <= img_dims[1])
+    y_mask = np.logical_and(pc_pixels[:, 1] >= 0,
+                            pc_pixels[:, 1] <= img_dims[0])
+    valid_idxs = np.squeeze(np.argwhere(np.logical_and(x_mask, y_mask)))
+    pc_pixels = pc_pixels[valid_idxs, :]
+    refl = refl[valid_idxs]
+
+    """Generate image and color with reflectance"""
+    refl *= 255
+    refl_img = np.zeros(img_dims, dtype=np.uint8)
+    mask_img = np.zeros(img_dims, dtype=np.uint8)
+
+    for i in range(pc_pixels.shape[0]):
+        x, y = pc_pixels[i, :]
+        x, y = int(x), int(y)
+        refl_img[y, x] = refl[i]
+
+    x_min, x_max = int(np.min(pc_pixels[:, 0])), int(np.max(pc_pixels[:, 0]))
+    y_min, y_max = int(np.min(pc_pixels[:, 1])), int(np.max(pc_pixels[:, 1]))
+    mask_img[y_min:y_max, x_min:x_max] = 1
+
+    if fill:
+        mask = (refl_img == 0).astype(np.uint8)
+        refl_img = cv.inpaint(refl_img, mask, fill_rad, cv.INPAINT_TELEA)
+
+    return refl_img, mask_img
