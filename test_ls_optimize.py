@@ -22,7 +22,7 @@ cfg.calib_dir = calib_dir
 # cfg.frames = [99, 139, 149, 150, 151, 152, 153]
 cfg.frames = [34, 35, 185]
 
-new = True
+new = False
 if new:
     # Detect edges from scratch
     calibrator = CameraLidarCalibrator(cfg, visualize=False)
@@ -49,7 +49,9 @@ print(len(calibrator.img_detector.imgs))
 # print(calibrator.batch_optimization(120))
 # sys.exit()
 # print(calibrator.compute_bf_cost(120))
-
+for i in range(len(calibrator.img_detector.imgs)):
+    calibrator.draw_depth_image(frame=i, show=True)
+sys.exit()
 print(calibrator.ls_optimize(120))
 calibrator.project_point_cloud()
 post = calibrator.draw_edge_points(
