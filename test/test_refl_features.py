@@ -1,9 +1,10 @@
 import cv2 as cv
 
 import os
+import pickle
 
 from calibration.utils.data_utils import *
-from calibration.utils.pc_utils import gen_reflectance_image
+from calibration.utils.pc_utils import *
 
 """Script parameters"""
 visualize_imgs = True
@@ -29,23 +30,24 @@ R, T = load_lid_cal(calib_dir)
 """Perturb the extrinsics """
 
 """Generate reflectance and grayscale images"""
+img_depth, _ = gen_depth_image(pc, R, T, K, img.shape[:2])
 img_gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
 img_gray = cv.blur(img_gray, (7, 7))
 img_refl, refl_mask = gen_reflectance_image(pc, R, T, K, img_gray.shape,
                                             fill=True, fill_rad=5)
 img_refl = cv.blur(img_refl, (3, 3))
-
+img_blend = cv.addWeighted(img_refl, 0.7, img_depth, 0.3, gamma=0)
 if visualize_imgs:
-    img_cat = np.concatenate([img_gray, img_refl], axis=0)
+    img_cat = np.concatenate([img_gray, img_blend], axis=0)
     cv.imshow('Concatenated', img_cat)
     cv.waitKey(0)
     cv.destroyAllWindows()
 
 """Detect, visualize features"""
 detector = cv.ORB_create(patchSize=91, edgeThreshold=91)
-descriptor = cv.xfeatures2d_VGG.create(desc=101, isigma=1.0, scale_factor=0.75)
+descriptor = cv.xfeatures2d_VGG.create(desc=100, isigma=1.0, scale_factor=0.75)
 kp_g = detector.detect(img_gray, None)
-kp_r = detector.detect(img_refl, refl_mask)
+kp_r = detector.detect(img_blend, refl_mask)
 desc_g = descriptor.compute(img_gray, kp_g, None)
 desc_r = descriptor.compute(img_refl, kp_r, refl_mask)
 
@@ -62,20 +64,19 @@ if visualize_kps:
 
 """Match, visualize matches"""
 bf = cv.BFMatcher()
-matches = bf.knnMatch(desc_g, desc_r, k=1)
+matches = bf.knnMatch(desc_g, desc_r, k=2)
 
-good = matches
-# good = []
-# for m, n in matches:
-#     if m.distance < n.distance:
-#         good.append([m])
+good = []
+for m, n in matches:
+    if m.distance < 0.9*n.distance:
+        good.append([m])
 
 if visualize_matches:
     img_gray_stack = np.repeat(np.expand_dims(img_gray, 2), 3, axis=2)
     img_refl_stack = np.repeat(np.expand_dims(img_refl, 2), 3, axis=2)
     img_match = cv.drawMatchesKnn(img_gray_stack, kp_g,
                                   img_refl_stack, kp_r,
-                                  good[:10],
+                                  good,
                                   None,
                                   flags=cv.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
     h, w, _ = img_match.shape

@@ -9,13 +9,13 @@ import json
 from prettytable import PrettyTable
 
 """Script parameters"""
-calibrator_path = '../generated/calibrators/0928-frame34-sed-pcthresh60.pkl'
+calibrator_path = '../generated/calibrators/0928-3frames-sed.pkl'
 LOG_DIR = '../generated/optimizer_logs/test'
 
 """Experiment parameters"""
-exp_params = {'NUM_SAMPLES': 2, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
-              'ALPHA_MI': [80.0], 'ALPHA_GMM': [1.0], 'ALPHA_POINTS': [1e-3],
-              'SIGMAS': [10.0],
+exp_params = {'NUM_SAMPLES': 1, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
+              'ALPHA_MI': [80.0], 'ALPHA_GMM': [1.0], 'ALPHA_POINTS': [0],
+              'SIGMAS': [15.0],
               'MAX_ITERS': 50}
 
 """Calibration directory specification"""
@@ -85,13 +85,15 @@ for sample_idx in range(exp_params['NUM_SAMPLES']):
 
     """Run optimizer"""
     stage_idx = 0
-    sigma_in, alpha_gmm, alpha_mi = exp_params['SIGMAS'][stage_idx], \
-                                    exp_params['ALPHA_GMM'][stage_idx], \
-                                    exp_params['ALPHA_MI'][stage_idx]
+    sigma_in, alpha_gmm, alpha_mi, alpha_points = exp_params['SIGMAS'][stage_idx], \
+                                                  exp_params['ALPHA_GMM'][stage_idx], \
+                                                  exp_params['ALPHA_MI'][stage_idx], \
+                                                  exp_params['ALPHA_POINTS'][stage_idx]
 
     tau_opt, cost_history = calibrator.ls_optimize(sigma_in,
                                                    alpha_gmm=alpha_gmm,
                                                    alpha_mi=alpha_mi,
+                                                   alpha_points=alpha_points,
                                                    maxiter=exp_params['MAX_ITERS'],
                                                    save_every=10)
 

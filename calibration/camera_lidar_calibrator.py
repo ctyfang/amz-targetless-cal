@@ -196,7 +196,7 @@ class CameraLidarCalibrator:
         cv.waitKey(0)
         cv.destroyAllWindows()
 
-    def draw_depth_image(self, score=None, img=None, frame=-2, show=False):
+    def draw_depth_image(self, score=None, img=None, frame=-1, show=False):
         img_h, img_w = self.img_detector.imgs[frame].shape[:2]
         image = np.zeros((img_h, img_w), dtype=np.float32)
 
@@ -483,11 +483,14 @@ class CameraLidarCalibrator:
 
     def compute_mi_cost(self, frame=-1):
         """Compute mutual info cost for one frame"""
+        self.project_point_cloud()
         grayscale_img = cv.cvtColor(self.img_detector.imgs[frame],
                                     cv.COLOR_BGR2GRAY)
         projected_points_valid = self.projected_points[frame] \
-            [self.projection_mask[frame]]
-        # print(f"Num valid points: {projected_points_valid.shape[0]}")
+                                 [self.projection_mask[frame], :]
+
+        print(f"Num valid points: {projected_points_valid.shape[0]}")
+
         grayscale_vector = np.expand_dims(
             grayscale_img[projected_points_valid[:, 1].astype(np.uint),
                           projected_points_valid[:, 0].astype(np.uint)], 1)
@@ -498,22 +501,35 @@ class CameraLidarCalibrator:
         if len(reflectance_vector) > 0 and len(grayscale_vector) > 0:
 
             joint_data = np.hstack([grayscale_vector, reflectance_vector])
-            grid_x, grid_y = np.meshgrid(range(-1, 257), range(-1, 257))
+            intensity_vector = np.linspace(0, 255, 510)
+            grid_x, grid_y = np.meshgrid(intensity_vector,
+                                         intensity_vector)
             grid_data = np.vstack([grid_y.ravel(), grid_x.ravel()])
+            grid_data = grid_data.T
 
-            # # Using KDEpy
-            gray_probs = FFTKDE(bw='silverman').fit(grayscale_vector).evaluate(
-                range(-1, 257))
+            # Using KDEpy
+
+            gray_probs = FFTKDE(
+                bw='silverman').fit(grayscale_vector).evaluate(intensity_vector)
+
             refl_probs = FFTKDE(
-                bw='silverman').fit(reflectance_vector).evaluate(range(-1, 257))
-            joint_probs = FFTKDE().fit(joint_data).evaluate(grid_data.T)
+                bw='silverman').fit(reflectance_vector).evaluate(intensity_vector)
+            joint_probs = FFTKDE().fit(joint_data).evaluate(grid_data)
 
             gray_probs /= np.sum(gray_probs)
             refl_probs /= np.sum(refl_probs)
+
+            # plt.figure()
+            # plt.bar(intensity_vector, gray_probs, color='blue')
+            # plt.bar(intensity_vector, refl_probs, color='red')
+            # plt.title('Distributions')
+            # plt.show()
+
             joint_probs /= np.sum(joint_probs)
             mi_cost = entropy(gray_probs) + \
                       entropy(refl_probs) - entropy(joint_probs)
-            mi_cost = max(0.0, mi_cost)
+            mi_cost = mi_cost
+
         else:
             mi_cost = 0
         return -mi_cost
@@ -581,18 +597,25 @@ class CameraLidarCalibrator:
                     method='lm',
                     alpha_gmm=1,
                     alpha_mi=8e2,
+                    alpha_points=1e-3,
                     maxiter=600,
                     save_every=100):
         """Optimize cost over all image-scan pairs using mutual info and gmm.
             Scale the contributions from two loss sources using alphas."""
         cost_history = []
+
         """Optimization config"""
+        self.numpoints_preopt = []
+        for i in range(len(self.projection_mask)):
+            self.numpoints_preopt.append(np.sum(self.projection_mask[i]))
+
         self.tau_ord_mags = np.log10(np.abs(self.tau))
         self.tau_ord_mags[3:] += 1
         self.tau_ord_mags = np.power(10 * np.ones(self.tau.shape),
                                      self.tau_ord_mags)
-
-        opt_options = {'disp': True, 'maxiter': maxiter, 'adaptive': True}
+        # self.tau_ord_mags = np.ones(self.tau.shape)
+        opt_options = {'disp': True, 'maxiter': maxiter, 'adaptive': True,
+                       'ftol':1e-1}
         self.num_iterations = 0
         self.tau_preoptimize = self.tau
         self.opt_save_every = save_every
@@ -603,10 +626,15 @@ class CameraLidarCalibrator:
             """Monitor number of points being projected onto the image"""
             total_valid_points = 0
             for frame_idx in range(len(self.projection_mask)):
-                total_valid_points += np.sum(self.projection_mask[frame_idx])
+                print(f"Valid points in frame {frame_idx} is \
+                      {np.sum(self.projection_mask[frame_idx])}")
 
-            if total_valid_points < 10000:
-                raise BadProjection
+            plt.figure()
+            plt.plot(cost_history)
+            plt.show()
+
+            # if total_valid_points < 10000:
+            #     raise BadProjection
 
             if self.num_iterations % self.opt_save_every == 0:
                 img = self.draw_all_points()
@@ -620,37 +648,38 @@ class CameraLidarCalibrator:
                   f"?"
                   f" {accepted}")
 
-        """Re-try optimization until final projection lands on image"""
         optim_successful = False
         start = time.time()
         while not optim_successful:
             print('Optimizing over all extrinsics...')
             try:
                 self.tau = np.divide(self.tau, self.tau_ord_mags)
-                # opt_results = minimize(loss_scaled,
-                #                        self.tau,
-                #                        method='Nelder-Mead',
-                #                        args=(
-                #                        self, sigma_in, alpha_mi, alpha_gmm,
-                #                        cost_history, None, False),
-                #                        options=opt_options,
-                #                        callback=loss_callback)
-
-                opt_results = basinhopping(loss_scaled,
-                                           self.tau,
-                                           niter=20,
-                                           T=10,
-                                           stepsize=0.05,
-                                           callback=bh_callback,
-                                           minimizer_kwargs={
-                                               'method': 'Nelder-Mead',
-                                               'args':
-                                                   (self, sigma_in, alpha_mi,
-                                                    alpha_gmm, cost_history,
-                                                    self.tau_ord_mags, False),
-                                               'options': opt_options,
-                                               'callback': loss_callback
-                                           })
+                opt_results = minimize(loss_scaled,
+                                       self.tau,
+                                       method='Nelder-Mead',
+                                       args=(
+                                       self, sigma_in, alpha_mi, alpha_gmm,
+                                       alpha_points,
+                                       cost_history, self.tau_ord_mags, False),
+                                       options=opt_options,
+                                       callback=loss_callback)
+                optim_successful = True
+                # opt_results = basinhopping(loss_scaled,
+                #                            self.tau,
+                #                            niter=20,
+                #                            T=10,
+                #                            stepsize=0.05,
+                #                            callback=bh_callback,
+                #                            minimizer_kwargs={
+                #                                'method': 'Nelder-Mead',
+                #                                'args':
+                #                                    (self, sigma_in, alpha_mi,
+                #                                     alpha_gmm, alpha_points,
+                #                                     cost_history,
+                #                                     self.tau_ord_mags, False),
+                #                                'options': opt_options,
+                #                                'callback': loss_callback
+                #                            })
                 # self.tau = opt_results.x
                 self.tau = opt_results.x * self.tau_ord_mags
 
@@ -712,8 +741,9 @@ class CameraLidarCalibrator:
         return tau_optimized.x
 
 
-def loss_scaled(tau, calibrator, sigma_in, alpha_mi, alpha_gmm, cost_history,
-                tau_scales, return_components):
+def loss_scaled(tau, calibrator, sigma_in, alpha_mi, alpha_gmm,
+                alpha_points,
+                cost_history, tau_scales, return_components):
     calibrator.tau = tau
 
     if tau_scales is not None:
@@ -722,18 +752,25 @@ def loss_scaled(tau, calibrator, sigma_in, alpha_mi, alpha_gmm, cost_history,
     calibrator.project_point_cloud()
     num_frames = len(calibrator.pc_detector.pcs)
 
-    cost_mi = cost_gmm = 0
-    for frame_idx in range(num_frames):
-        cost_mi += alpha_mi * calibrator.compute_mi_cost(frame_idx)
-        cost_gmm += alpha_gmm * calibrator.compute_conv_cost(
-            sigma_in, frame_idx)
+    cost_components = [0, 0, 0]
 
-    total_cost = (cost_mi / num_frames) + (cost_gmm / num_frames)
+    total_points = 0
+    for frame_idx in range(num_frames):
+        cost_components[0] += (alpha_mi * calibrator.compute_mi_cost(frame_idx))
+        cost_components[1] += (alpha_gmm * calibrator.compute_conv_cost(
+                               sigma_in, frame_idx))
+        cost_components[2] += alpha_points*(np.abs(
+                              np.sum(calibrator.projection_mask[frame_idx])
+                              - calibrator.numpoints_preopt[frame_idx]))
+
+    # cost_components.append(points_cost)
+
+    total_cost = sum(cost_components)
     cost_history.append(total_cost)
-    # print([cost_mi, cost_gmm])
+    print(cost_components)
 
     if return_components:
-        return [cost_mi / num_frames, cost_gmm / num_frames]
+        return cost_components
     else:
         return cost_history[-1]
 
