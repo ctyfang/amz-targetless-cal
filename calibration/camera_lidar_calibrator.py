@@ -5,6 +5,7 @@ import cv2 as cv
 from pyquaternion import Quaternion
 import gc
 import itertools as iter
+import scipy
 from datetime import datetime
 
 from scipy.ndimage.filters import gaussian_filter, convolve
@@ -196,7 +197,7 @@ class CameraLidarCalibrator:
         cv.waitKey(0)
         cv.destroyAllWindows()
 
-    def draw_depth_image(self, score=None, img=None, frame=-2, show=False):
+    def draw_depth_image(self, frame=-1, show=False):
         img_h, img_w = self.img_detector.imgs[frame].shape[:2]
         image = np.zeros((img_h, img_w), dtype=np.float32)
 
@@ -666,50 +667,129 @@ class CameraLidarCalibrator:
         print(f"NL optimizer time={time.time() - start}")
         return self.tau, cost_history
 
-    def batch_optimization(self,
-                           sigma_in,
-                           method='lm',
-                           alpha_gmm=1,
-                           alpha_mi=30):
-        cost_history = []
+    def batch_optimization(self, sigma_in=6):
+        # cost_history = []
+        self.num_iterations = 0
+        def loss(tau_init, calibrator, sigma, cost_history):
+            local_cost = []
+            calibrator.tau = tau_init
+            calibrator.project_point_cloud()
+            # print(len(calibrator.projected_points))
+            for i in range(len(calibrator.img_detector.imgs)):
+                hm_ptc = calibrator.compute_heat_map(
+                    sigma=sigma, frame=i, ptCloud=True)
+                hm_img = calibrator.compute_heat_map(
+                    sigma=sigma, frame=i, ptCloud=False)
+                diff = hm_img - hm_ptc
+                # cost = -np.linalg.norm(diff, ord=2)
+                local_cost.append(np.linalg.norm(diff, ord=2))
 
-        def loss(tau_init, calibrator, sigma_in, cost_history):
-            # local_cost = []
-            # calibrator.tau = tau_init
-            # calibrator.project_point_cloud()
-            # # print(len(calibrator.projected_points))
-            # for i in range(len(calibrator.img_detector.imgs)):
-            #     cost_gmm = alpha_gmm*calibrator.compute_conv_cost(sigma_in, frame=i)
-            # # cost_mi = alpha_mi*calibrator.compute_mi_cost()
-            #     local_cost.append(cost_gmm)
+            cost_history.append(np.sum(local_cost))
 
-            # cost_history.append(local_cost)
-            cost_history.append(np.random.uniform(-threshold, threshold, (7,)))
+            if self.num_iterations % 100 == 0:
+                img = self.draw_all_points(frame=0)
+                cv.imwrite('generated/'+ str(self.num_iterations) + '.jpg', img)
+            self.num_iterations += 1
             print((cost_history[-1]))
-            # sys.exit()
-            # print(cost_history[-1])
+
             return cost_history[-1]
 
         start = time.time()
-        threshold = 0.01
+        threshold = 0.05
         err = np.random.uniform(-threshold, threshold, (6,))
-        tau_optimized = least_squares(loss,
-                                      self.tau + err,
-                                      method='lm',
-                                      args=(self, sigma_in, cost_history))
+        self.tau += err
+        while sigma_in > 1:
+            cost_history = []
+            opt_results = minimize(loss,
+                                self.tau + err,
+                                method='Nelder-Mead',
+                                args=(
+                                self, sigma_in, cost_history))#,
+                                #options=opt_options,
+                                #callback=loss_callback)
+            sigma_in -= 3
+            cost_history = np.array(cost_history)
+            print(cost_history.shape)
+
+            plt.plot(range(len(cost_history)), cost_history)           
 
         print(f"Batch optimizer time={time.time() - start}")
-        cost_history = np.array(cost_history)
-        print(cost_history.shape)
 
-        fig, ax = plt.subplots(len(self.img_detector.imgs))
-        print(ax)
-        # sys.exit()
-        for i in range(len(ax)):
-            ax[i].plot(range(len(cost_history)), cost_history[:, i])
+        # fig, ax = plt.subplots(len(self.img_detector.imgs))
+        # # sys.exit()
+        # for i in range(len(ax)):
+        #     ax[i].plot(range(len(cost_history)), cost_history[:, i])
         plt.show()
-        self.tau = tau_optimized.x
-        return tau_optimized.x
+        img = self.draw_all_points(frame=0)
+        cv.imwrite('generated/'+ str(self.num_iterations) + '.jpg', img)
+        self.tau = opt_results.x
+        return opt_results.x
+
+    def compute_heat_map(self,
+                         sigma,
+                         frame=-1,
+                         ptCloud=False,
+                         show=False):
+        """Compute heat map"""
+        # start_t = time.time()
+        cost_map = np.zeros(self.img_detector.img_edge_scores[frame].shape)
+        gauss2d = getGaussianKernel2D(sigma, False)
+        if ptCloud:
+            for idx_pc in range(self.pc_detector.pcs_edge_idxs[frame].shape[0]):
+
+                idx = self.pc_detector.pcs_edge_idxs[frame][idx_pc]
+
+                # check if projected projected point lands within image bounds
+                if not self.projection_mask[frame][idx]:
+                    continue
+
+                mu_x, mu_y = self.projected_points[frame][idx].astype(np.int)
+                # Get gaussian kernel
+                # Distance > 3 sigma is set to 0
+                # and normalized so that the total Kernel = 1
+
+                top, bot, left, right = get_boundry(
+                    self.img_detector.img_edge_scores[frame], (mu_y, mu_x),
+                    int(sigma))
+
+                kernel_patch = gauss2d[3 * int(sigma) - top:3 * int(sigma) +
+                                       bot, 3 * int(sigma) -
+                                       left:3 * int(sigma) + right].copy()
+
+                # Normalize by number of edge projected_points in the neighborhood
+                cost_map[mu_y - top:mu_y + bot,
+                         mu_x - left:mu_x + right] += kernel_patch
+            threshold = np.amax(gauss2d)
+            cost_map[cost_map < threshold] = 0
+            if show:
+                plot_2d(cost_map,
+                        figname='generated/heat_map_ptc_{}'.format(frame))
+            gc.collect()
+            return cost_map
+
+        for mu_x in range(self.img_detector.imgs_edges[frame].shape[1]):
+            for mu_y in range(self.img_detector.imgs_edges[frame].shape[0]):
+                # mu_x, mu_y = self.projected_points[frame][idx].astype(np.int)
+                if not self.img_detector.imgs_edges[frame][mu_y, mu_x]:
+                    continue
+
+                top, bot, left, right = get_boundry(
+                    self.img_detector.img_edge_scores[frame], (mu_y, mu_x),
+                    int(sigma))
+
+                kernel_patch = gauss2d[3 * int(sigma) - top:3 * int(sigma) +
+                                       bot, 3 * int(sigma) -
+                                       left:3 * int(sigma) + right].copy()
+
+                cost_map[mu_y - top:mu_y + bot,
+                         mu_x - left:mu_x + right] += kernel_patch
+
+        threshold = np.amax(gauss2d)
+        cost_map[cost_map < threshold] = 0
+        if show:
+            plot_2d(cost_map, figname='generated/heat_map_img_{}'.format(frame))
+        gc.collect()
+        return cost_map
 
 
 def loss_scaled(tau, calibrator, sigma_in, alpha_mi, alpha_gmm, cost_history,
@@ -736,6 +816,24 @@ def loss_scaled(tau, calibrator, sigma_in, alpha_mi, alpha_gmm, cost_history,
         return [cost_mi / num_frames, cost_gmm / num_frames]
     else:
         return cost_history[-1]
+
+
+def drawlines(img1, img2, lines, pts1, pts2):
+    ''' img1 - image on which we draw the epilines for the points in img2
+        lines - corresponding epilines '''
+    r, c = img1.shape[:2]
+    img1 = img1.copy()
+    img2 = img2.copy()
+    dists1 = []
+    dists2 = []
+    for r, pt1, pt2 in zip(lines, pts1, pts2):
+        color = tuple(np.random.randint(0, 255, 3).tolist())
+        x0, y0 = map(int, [0, -r[2] / r[1]])
+        x1, y1 = map(int, [c, -(r[2] + r[0] * c) / r[1]])
+        img1 = cv2.line(img1, (x0, y0), (x1, y1), color, 1)
+        img1 = cv2.circle(img1, tuple(pt1), 5, color, -1)
+        img2 = cv2.circle(img2, tuple(pt2), 5, color, -1)
+    return img1, img2
 
 
 class BadProjection(Exception):
