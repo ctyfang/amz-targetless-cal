@@ -262,3 +262,19 @@ def get_trans_bounds(trans_vec, trans_range=0.25):
     z_bounds = [trans_vec[2] - trans_range, trans_vec[2] + trans_range]
 
     return [x_bounds, y_bounds, z_bounds]
+
+
+def get_initial_simplex(x0, nonzdelt=0.05, zdelt=0.00025):
+
+    D = np.max(x0.shape)
+    simplex = np.zeros((D+1, D))
+    simplex[0, :] = x0
+
+    for i in range(0, D):
+        x = x0.copy()
+        if x[i] == 0:
+            x[i] = (1 + zdelt)*x[i]
+        else:
+            x[i] = (1 + nonzdelt)*x[i]
+        simplex[i+1, :] = x
+    return simplex

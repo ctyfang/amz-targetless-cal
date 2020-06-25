@@ -3,6 +3,7 @@ from calibration.utils.config import command_line_parser
 from calibration.utils.data_utils import *
 from calibration.utils.img_utils import *
 
+from tqdm import tqdm
 import pickle
 import json
 import pyquaternion as pyquat
@@ -24,20 +25,21 @@ cfg.pc_dir = input_dir
 cfg.img_dir = input_dir
 cfg.calib_dir = calib_dir
 
-BASE_DIR = '../output/logs/exp_gmm-only_n=9_trials=5'
+BASE_DIR = '../generated/optimizer_logs/test'
 # Load calibrator with detected edges from pickled object
-with open('../output/calibrator_collection-8-0928.pkl', 'rb') as input_pkl:
+with open('../generated/calibrators/correspondence_test.pkl', 'rb') as input_pkl:
     calibrator = pickle.load(input_pkl)
     calibrator.visualize = True
 
-print(len(calibrator.pc_detector.pcs))
-print(len(calibrator.img_detector.imgs))
 # Experiment Parameters
 with open(os.path.join(BASE_DIR, 'params.json')) as params:
     opt_params = json.load(params)
-exp_params = {'trans_range': 0.20, 'angle_range': 20}
+exp_params = {'trans_range': 0.10, 'angle_range': 10}
 
-trial_idx = 3
+tau_scales_log = np.asarray([1, 1, 1, -2, -2, -2])
+tau_scales = np.power(10 * np.ones(tau_scales_log.shape),
+                      tau_scales_log)
+trial_idx = 0
 tau_data = np.load(os.path.join(BASE_DIR, 'tau_data.npy'))
 tau_gt = tau_data[trial_idx, :]
 stage_idx = 0
@@ -46,25 +48,29 @@ stage_idx = 0
 
 plt.subplot(1, 2, 1)
 base_idx = 3
-trans_res = 0.00125
+trans_res = 0.0250
 trans_range = (-exp_params['trans_range'],
                +exp_params['trans_range'])
 offset_vals = np.linspace(trans_range[0], trans_range[1], round((trans_range[1] - trans_range[0])/trans_res) + 1)
 
 for offset_idx in range(3):
     cost = np.zeros(offset_vals.shape)
-    for idx, val in enumerate(offset_vals):
+    for [idx, val] in tqdm(enumerate(offset_vals)):
         tau_temp = deepcopy(tau_gt)
         tau_temp[base_idx+offset_idx] += val
 
-        curr_cost = loss(tau_temp, calibrator,
-                         opt_params['SIGMAS'][stage_idx], opt_params['ALPHA_MI'][stage_idx],
-                         opt_params['ALPHA_GMM'][stage_idx],  opt_params['ALPHA_POINTS'][stage_idx], [])
+        curr_cost = loss_scaled(tau_temp, calibrator,
+                                 opt_params['SIGMAS'][stage_idx],
+                                 opt_params['ALPHA_MI'][stage_idx],
+                                 opt_params['ALPHA_GMM'][stage_idx],
+                                 opt_params['ALPHA_CORR'][stage_idx], [],
+                                 tau_scales, False)
 
         cost[idx] = curr_cost
     plt.plot(offset_vals, cost)
 plt.legend(['x', 'y', 'z'])
 plt.xlabel('Translation Displacement (m)')
+plt.show()
 
 ## ROTATION ##
 
@@ -77,7 +83,7 @@ offset_vals = np.linspace(angle_range[0], angle_range[1], round((angle_range[1] 
 for dim in range(3):
     cost = np.zeros(offset_vals.shape)
 
-    for idx, val in enumerate(offset_vals):
+    for [idx, val] in tqdm(enumerate(offset_vals)):
         euler_offset = [0, 0, 0]
         euler_offset[dim] = val
 
@@ -91,8 +97,12 @@ for dim in range(3):
         tau_temp = deepcopy(tau_gt)
         tau_temp[:3] = rvec_new
 
-        curr_cost = loss(tau_temp, calibrator, opt_params['SIGMAS'][stage_idx], opt_params['ALPHA_MI'][stage_idx],
-                         opt_params['ALPHA_GMM'][stage_idx], opt_params['ALPHA_POINTS'][stage_idx], [])
+        curr_cost = loss_scaled(tau_temp, calibrator,
+                                opt_params['SIGMAS'][stage_idx],
+                                opt_params['ALPHA_MI'][stage_idx],
+                                opt_params['ALPHA_GMM'][stage_idx],
+                                opt_params['ALPHA_CORR'][stage_idx], [],
+                                tau_scales, False)
 
         cost[idx] = curr_cost
     plt.plot(offset_vals, cost)

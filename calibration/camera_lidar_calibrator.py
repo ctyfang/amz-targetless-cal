@@ -10,6 +10,7 @@ from datetime import datetime
 from scipy.ndimage.filters import gaussian_filter, convolve
 from scipy.optimize import least_squares, minimize, root, differential_evolution, basinhopping
 from scipy.stats import multivariate_normal, gaussian_kde, entropy, norm
+from scipy.spatial.ckdtree import cKDTree
 from sklearn.feature_selection import mutual_info_regression
 from sklearn.metrics import mutual_info_score
 from scipy.linalg import expm
@@ -35,6 +36,8 @@ class CameraLidarCalibrator:
         self.projection_mask = []
         self.K = np.asarray(cfg.K)
         self.R, self.T = load_lid_cal(cfg.calib_dir)
+        self.correspondences = []
+        self.num_frames = 0
 
         if tau_init:
             self.tau = tau_init
@@ -46,9 +49,13 @@ class CameraLidarCalibrator:
         # Load point clouds/images into the detectors
         self.img_detector = ImgEdgeDetector(cfg, visualize=False)
         self.pc_detector = PcEdgeDetector(cfg, visualize=visualize)
+        self.num_frames = len(self.img_detector.imgs)
 
         # Calculate projected_points, points_cam_frame, projection_mask
         self.project_point_cloud()
+
+        # User input of correspondences
+        self.select_correspondences()
 
         # Detect edges
         self.img_detector.img_detect(method=cfg.pc_ed_method,
@@ -68,6 +75,95 @@ class CameraLidarCalibrator:
             self.draw_edge_points()
             self.draw_edge_points(score=self.pc_detector.pcs_edge_scores[-1],
                                   image=self.img_detector.img_edge_scores[-1])
+
+    def select_correspondences(self):
+        self.correspondences = []
+
+        curr_img_name = "gray"
+        points_selected = 0
+        refPt = np.asarray([0, 0], dtype=np.uint)
+        refPt_3D = np.asarray([0, 0, 0], dtype=np.float32)
+
+        pc_pixel_tree = None
+        curr_pc_pixels = None
+        curr_pc = None
+
+        def correspondence_cb(event, x, y, flags, param):
+            if event == cv.EVENT_LBUTTONDOWN:
+                if curr_img_name == "gray":
+                    refPt[0], refPt[1] = x, y
+                else:
+                    d, i = pc_pixel_tree.query(
+                        np.asarray([x, y]).reshape((1, 2)), 1)
+                    nearest_pixel = curr_pc_pixels[i, :].astype(np.uint)[0]
+                    refPt[0], refPt[1] = nearest_pixel[0], nearest_pixel[1]
+                    refPt_3D[:] = curr_pc[i, :]
+
+        for frame_idx in range(self.num_frames):
+            curr_pc = self.pc_detector.pcs[frame_idx]
+            curr_pc_pixels = self.projected_points[frame_idx]
+            pc_pixel_tree = cKDTree(curr_pc_pixels)
+
+            img_gray = cv.cvtColor(self.img_detector.imgs[frame_idx],
+                                   cv.COLOR_BGR2GRAY)
+            img_synthetic = gen_synthetic_image(curr_pc,
+                                             self.pc_detector.reflectances[frame_idx],
+                                             self.R, self.T, self.K,
+                                             (self.img_detector.img_h,
+                                             self.img_detector.img_w))
+
+            cv.namedWindow("Correspondences")
+            cv.setMouseCallback("Correspondences", correspondence_cb)
+
+            gray_pixels = []
+            lidar_pixels = []
+            lidar_points = []
+            while True:
+                if points_selected % 2 == 0:
+                    curr_img = img_gray
+                    curr_img_name = "gray"
+                else:
+                    curr_img = img_synthetic
+                    curr_img_name = "synthetic"
+
+                curr_img = np.repeat(np.expand_dims(curr_img, axis=2), 3, axis=2)
+                curr_img = cv.circle(curr_img, tuple(refPt), radius=2,
+                                     color=(255, 0, 0),
+                                     thickness=-1)
+                cv.imshow("Correspondences", curr_img)
+                key = cv.waitKey(1)
+
+                if key == ord('y'):
+                    points_selected += 1
+                    if curr_img_name == "synthetic":
+                        lidar_pixels.append(refPt.copy())
+                        lidar_points.append(refPt_3D.copy())
+                    else:
+                        gray_pixels.append(refPt.copy())
+
+                elif key == ord('q'):
+                    if points_selected % 2 == 0:
+                        break
+                    else:
+                        print("Uneven number of points. Select one more.")
+
+            gray_pixels = np.asarray(gray_pixels)
+            lidar_pixels = np.asarray(lidar_pixels)
+            lidar_points = np.asarray(lidar_points)
+
+            if self.visualize:
+                cv.imshow("Matches", draw_point_matches(img_gray, gray_pixels,
+                                     img_synthetic, lidar_pixels))
+                cv.waitKey(0)
+                cv.destroyAllWindows()
+
+            self.correspondences.append((gray_pixels,
+                                         lidar_points))
+
+    def update_extrinsics(self, tau_new):
+        R, T = self.tau_to_transform(tau_new)
+        self.R, self.T = R, T
+        self.tau = tau_new
 
     @staticmethod
     def transform_to_tau(R, T):
@@ -489,8 +585,6 @@ class CameraLidarCalibrator:
         projected_points_valid = self.projected_points[frame] \
                                  [self.projection_mask[frame], :]
 
-        print(f"Num valid points: {projected_points_valid.shape[0]}")
-
         grayscale_vector = np.expand_dims(
             grayscale_img[projected_points_valid[:, 1].astype(np.uint),
                           projected_points_valid[:, 0].astype(np.uint)], 1)
@@ -507,8 +601,6 @@ class CameraLidarCalibrator:
             grid_data = np.vstack([grid_y.ravel(), grid_x.ravel()])
             grid_data = grid_data.T
 
-            # Using KDEpy
-
             gray_probs = FFTKDE(
                 bw='silverman').fit(grayscale_vector).evaluate(intensity_vector)
 
@@ -518,12 +610,6 @@ class CameraLidarCalibrator:
 
             gray_probs /= np.sum(gray_probs)
             refl_probs /= np.sum(refl_probs)
-
-            # plt.figure()
-            # plt.bar(intensity_vector, gray_probs, color='blue')
-            # plt.bar(intensity_vector, refl_probs, color='red')
-            # plt.title('Distributions')
-            # plt.show()
 
             joint_probs /= np.sum(joint_probs)
             mi_cost = entropy(gray_probs) + \
@@ -592,12 +678,41 @@ class CameraLidarCalibrator:
         gc.collect()
         return -np.sum(cost_map)
 
+    def compute_corresp_cost(self, norm="L2"):
+        """Return average distance between all correspondences"""
+        pixel_distances = []
+        num_corresp = 0
+        dist_offset = np.sqrt(self.img_detector.img_w**2 +
+                              self.img_detector.img_h**2)*3
+
+        for matches in self.correspondences:
+            gray_pixels = matches[0]
+            lidar_points = matches[1]
+            lidar_points_cam = np.matmul(self.R, lidar_points.T) + self.T
+            lidar_pixels_homo = (np.matmul(self.K, lidar_points_cam).T)
+            lidar_pixels_homo = lidar_pixels_homo / \
+                                np.expand_dims(lidar_pixels_homo[:, 2], axis=1)
+            lidar_pixels = lidar_pixels_homo[:, :2]
+
+            pixel_diff = gray_pixels - lidar_pixels
+            pixel_distances += np.linalg.norm(pixel_diff, axis=1, ord=1).tolist()
+            num_corresp += lidar_pixels.shape[0]
+
+        total_dist = 0
+        for dist in pixel_distances:
+            if dist <= 5:
+                total_dist += dist
+            else:
+                total_dist += (dist**2)
+        average_dist = total_dist/num_corresp
+        return -dist_offset + 3*average_dist
+
     def ls_optimize(self,
                     sigma_in,
                     method='lm',
                     alpha_gmm=1,
                     alpha_mi=8e2,
-                    alpha_points=1e-3,
+                    alpha_corr=2,
                     maxiter=600,
                     save_every=100):
         """Optimize cost over all image-scan pairs using mutual info and gmm.
@@ -609,13 +724,14 @@ class CameraLidarCalibrator:
         for i in range(len(self.projection_mask)):
             self.numpoints_preopt.append(np.sum(self.projection_mask[i]))
 
-        self.tau_ord_mags = np.log10(np.abs(self.tau))
-        self.tau_ord_mags[3:] += 1
+        # self.tau_ord_mags = np.log10(np.abs(self.tau))
+        self.tau_ord_mags = np.asarray([1, 1, 1, -2, -2, -2])
         self.tau_ord_mags = np.power(10 * np.ones(self.tau.shape),
                                      self.tau_ord_mags)
-        # self.tau_ord_mags = np.ones(self.tau.shape)
+
         opt_options = {'disp': True, 'maxiter': maxiter, 'adaptive': True,
-                       'ftol':1e-1}
+                       'ftol': 1e-1, 'xtol': 1e-5, 'gtol': 1e-3,
+                       'finite_diff_rel_step': 1e-4}
         self.num_iterations = 0
         self.tau_preoptimize = self.tau
         self.opt_save_every = save_every
@@ -623,12 +739,6 @@ class CameraLidarCalibrator:
         def loss_callback(xk, state=None):
             # print(xk*self.tau_ord_mags)
             self.num_iterations += 1
-            """Monitor number of points being projected onto the image"""
-            total_valid_points = 0
-            for frame_idx in range(len(self.projection_mask)):
-                print(f"Valid points in frame {frame_idx} is \
-                      {np.sum(self.projection_mask[frame_idx])}")
-
             plt.figure()
             plt.plot(cost_history)
             plt.show()
@@ -659,33 +769,79 @@ class CameraLidarCalibrator:
                                        method='Nelder-Mead',
                                        args=(
                                        self, sigma_in, alpha_mi, alpha_gmm,
-                                       alpha_points,
-                                       cost_history, self.tau_ord_mags, False),
+                                       alpha_corr, cost_history,
+                                       self.tau_ord_mags, False),
                                        options=opt_options,
                                        callback=loss_callback)
                 optim_successful = True
-                # opt_results = basinhopping(loss_scaled,
-                #                            self.tau,
-                #                            niter=20,
-                #                            T=10,
-                #                            stepsize=0.05,
-                #                            callback=bh_callback,
-                #                            minimizer_kwargs={
-                #                                'method': 'Nelder-Mead',
-                #                                'args':
-                #                                    (self, sigma_in, alpha_mi,
-                #                                     alpha_gmm, alpha_points,
-                #                                     cost_history,
-                #                                     self.tau_ord_mags, False),
-                #                                'options': opt_options,
-                #                                'callback': loss_callback
-                #                            })
-                # self.tau = opt_results.x
                 self.tau = opt_results.x * self.tau_ord_mags
 
-                # print("Optimization successful: {}\n {}\n".format(
-                #     opt_results.success, opt_results.message))
-                # optim_successful = True
+            except BadProjection:
+                print("Bad projection.. trying again")
+                self.tau = perturb_tau(self.tau_preoptimize, 0.005, 0.5)
+                cost_history = []
+
+        print(f"NL optimizer time={time.time() - start}")
+        return self.tau, cost_history
+
+    def ls_optimize_translation(self,
+                                sigma_in,
+                                method='lm',
+                                alpha_gmm=1,
+                                alpha_mi=8e2,
+                                alpha_corr=2,
+                                maxiter=600,
+                                save_every=25):
+        """Optimize cost over all image-scan pairs using mutual info and gmm.
+            Scale the contributions from two loss sources using alphas."""
+        cost_history = []
+
+        """Optimization config"""
+        opt_options = {'disp': True, 'maxiter': maxiter, 'adaptive': True,
+                       'ftol': 1e-1, 'xtol': 1e-5, 'gtol': 1e-3,
+                       'finite_diff_rel_step': 1e-4,
+                       'initial_simplex': get_initial_simplex(self.tau[3:], 0.5)}
+        self.num_iterations = 0
+        self.tau_preoptimize = self.tau
+        self.opt_save_every = save_every
+
+        def loss_callback(xk, state=None):
+            # print(xk*self.tau_ord_mags)
+            self.num_iterations += 1
+            plt.figure()
+            plt.plot(cost_history)
+            plt.show()
+
+            # if total_valid_points < 10000:
+            #     raise BadProjection
+
+            if self.num_iterations % self.opt_save_every == 0:
+                img = self.draw_all_points()
+                cv.imwrite(str(self.num_iterations) + '.jpg', img)
+
+            return False
+
+        def bh_callback(x, f, accepted):
+            self.num_iterations = 0
+            print(f"at minimum {f} accepted {np.multiply(x, self.tau_ord_mags)}"
+                  f"?"
+                  f" {accepted}")
+
+        optim_successful = False
+        start = time.time()
+        while not optim_successful:
+            print('Optimizing over translation...')
+            try:
+                opt_results = minimize(loss_translation,
+                                       self.tau[3:],
+                                       method='Nelder-Mead',
+                                       args=(
+                                       self, sigma_in, alpha_mi, alpha_gmm,
+                                       alpha_corr, cost_history, False),
+                                       options=opt_options,
+                                       callback=loss_callback)
+                optim_successful = True
+                self.tau[3:] = opt_results.x
 
             except BadProjection:
                 print("Bad projection.. trying again")
@@ -742,37 +898,53 @@ class CameraLidarCalibrator:
 
 
 def loss_scaled(tau, calibrator, sigma_in, alpha_mi, alpha_gmm,
-                alpha_points,
-                cost_history, tau_scales, return_components):
-    calibrator.tau = tau
-
+                alpha_corr, cost_history, tau_scales, return_components):
+    calibrator.update_extrinsics(tau)
     if tau_scales is not None:
         calibrator.tau = np.multiply(calibrator.tau, tau_scales)
 
     calibrator.project_point_cloud()
-    num_frames = len(calibrator.pc_detector.pcs)
+    cost_components = np.zeros((3, 1))
 
-    cost_components = [0, 0, 0]
-
-    total_points = 0
-    for frame_idx in range(num_frames):
+    for frame_idx in range(calibrator.num_frames):
         cost_components[0] += (alpha_mi * calibrator.compute_mi_cost(frame_idx))
         cost_components[1] += (alpha_gmm * calibrator.compute_conv_cost(
                                sigma_in, frame_idx))
-        cost_components[2] += alpha_points*(np.abs(
-                              np.sum(calibrator.projection_mask[frame_idx])
-                              - calibrator.numpoints_preopt[frame_idx]))
-
-    # cost_components.append(points_cost)
+        cost_components[2] += alpha_corr * calibrator.compute_corresp_cost()
 
     total_cost = sum(cost_components)
     cost_history.append(total_cost)
-    print(cost_components)
 
+    print(cost_components)
     if return_components:
         return cost_components
     else:
-        return cost_history[-1]
+        return sum(cost_components)
+
+
+def loss_translation(trans, calibrator, sigma_in, alpha_mi, alpha_gmm,
+                     alpha_corr, cost_history, return_components):
+    tau_new = calibrator.tau
+    tau_new[3:] = trans
+    calibrator.update_extrinsics(tau_new)
+
+    calibrator.project_point_cloud()
+    cost_components = np.zeros((3, 1))
+
+    for frame_idx in range(calibrator.num_frames):
+        cost_components[0] += (alpha_mi * calibrator.compute_mi_cost(frame_idx))
+        cost_components[1] += (alpha_gmm * calibrator.compute_conv_cost(
+                               sigma_in, frame_idx))
+        cost_components[2] += alpha_corr * calibrator.compute_corresp_cost()
+
+    total_cost = sum(cost_components)
+    cost_history.append(total_cost)
+
+    print(cost_components)
+    if return_components:
+        return cost_components
+    else:
+        return sum(cost_components)
 
 
 class BadProjection(Exception):

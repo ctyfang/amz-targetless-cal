@@ -171,6 +171,34 @@ def custom_draw_geometry_with_key_callbacks(pcd):
         [pcd], key_to_callback)
 
 
+def get_pc_pixels(pc, R, T, K, img_dims):
+    R = R.reshape((3, 3))
+    T = T.reshape((3, 1))
+    K = K.reshape((3, 3))
+
+    """Remove points behind the vehicle"""
+    pc = pc[pc[:, 0] > 0, :]
+
+    """Separate position from reflectance"""
+    refl = pc[:, 3]
+    pc = pc[:, :3]
+
+    """Transform from LiDAR to camera frame, project onto image"""
+    pc_cam = np.matmul(R, np.transpose(pc)) + T
+    pc_pixels = np.matmul(K, pc_cam)
+    pc_pixels /= pc_pixels[2, :]
+    pc_pixels = np.transpose(pc_pixels[:2, :])  # Reshape to Nx2
+
+    """Remove pixels outside image bounds"""
+    x_mask = np.logical_and(pc_pixels[:, 0] >= 0,
+                            pc_pixels[:, 0] <= img_dims[1])
+    y_mask = np.logical_and(pc_pixels[:, 1] >= 0,
+                            pc_pixels[:, 1] <= img_dims[0])
+    valid_idxs = np.squeeze(np.argwhere(np.logical_and(x_mask, y_mask)))
+    pc_pixels = pc_pixels[valid_idxs, :]
+    return pc_pixels
+
+
 def gen_reflectance_image(pc, R, T, K, img_dims, fill=False, fill_rad=3):
     """Given a pointcloud, rotation matrix, translation vector, and camera
      intrinsics, generate the reflectance image with specified image dimensions.
@@ -224,7 +252,7 @@ def gen_reflectance_image(pc, R, T, K, img_dims, fill=False, fill_rad=3):
     return refl_img, mask_img
 
 
-def gen_depth_image(pc, R, T, K, img_dims):
+def gen_depth_image(pc, R, T, K, img_dims, fill_rad=3):
     """Given a pointcloud, rotation matrix, translation vector, and camera
      intrinsics, generate the reflectance image with specified image dimensions.
      image_dims specified as (h, w). PC is a numpy array of shape (N, 4)
@@ -265,17 +293,78 @@ def gen_depth_image(pc, R, T, K, img_dims):
 
     depth = np.linalg.norm(pc_cam, ord=2, axis=1)
     depth_valid = depth[valid_idxs]
-
-    # depth_valid = self.pc_detector.reflectances[frame][
-    #     self.projection_mask[frame]] * 255
     depth_img = griddata(pc_pixels,
                          depth_valid, (grid_x, grid_y),
                          method='linear').T
 
-    depth_img = (255 - depth_img * 255 / np.nanmax(depth_img)).astype(np.uint8)
+    depth_img = (depth_img * 255 / np.nanmax(depth_img)).astype(np.uint8)
 
     cv.imshow('Depth image with linear interpolation', depth_img)
     cv.waitKey(0)
     cv.destroyAllWindows()
 
     return depth_img, None
+
+
+def gen_synthetic_image(pc, refl, R, T, K, img_dims, fill_rad=3,
+                        alpha_depth=0.5, alpha_refl=0.5):
+    """Given a pointcloud, rotation matrix, translation vector, and camera
+     intrinsics, generate the reflectance image with specified image dimensions.
+     image_dims specified as (h, w). PC is a numpy array of shape (N, 4)
+     where each row is [X, Y, Z, Reflectance] with reflectance in range [0, 1].
+
+     Return the reflectance image, and a mask image. Mask image indicates the
+     areas with pixels.
+     """
+
+    R = R.reshape((3, 3))
+    T = T.reshape((3, 1))
+    K = K.reshape((3, 3))
+
+    """Remove points behind the vehicle"""
+    pc_mask = np.logical_and(pc[:, 0] > 0, pc[:, 0] < 30)
+    pc = pc[pc_mask, :]
+    refl = refl[pc_mask]
+
+    """Separate position from reflectance"""
+    pc = pc[:, :3]
+
+    """Transform from LiDAR to camera frame, project onto image"""
+    pc_cam = np.matmul(R, np.transpose(pc)) + T
+    pc_pixels = np.matmul(K, pc_cam)
+    pc_pixels /= pc_pixels[2, :]
+    pc_pixels = np.transpose(pc_pixels[:2, :]) # Reshape to Nx2
+    pc_cam = pc_cam.T
+
+    """Remove pixels outside image bounds"""
+    x_mask = np.logical_and(pc_pixels[:, 0] >= 0,
+                            pc_pixels[:, 0] <= img_dims[1])
+    y_mask = np.logical_and(pc_pixels[:, 1] >= 0,
+                            pc_pixels[:, 1] <= img_dims[0])
+    valid_idxs = np.squeeze(np.argwhere(np.logical_and(x_mask, y_mask)))
+    pc_pixels = pc_pixels[valid_idxs, :]
+    refl = refl[valid_idxs]
+
+    img_h, img_w = img_dims
+    grid_x, grid_y = np.mgrid[0:img_w, 0:img_h]
+
+    """Depth Image"""
+    depth = np.linalg.norm(pc_cam, ord=2, axis=1)
+    depth_valid = depth[valid_idxs]
+    depth_img = griddata(pc_pixels,
+                         depth_valid, (grid_x, grid_y),
+                         method='linear').T
+    depth_img = (1 - depth_img * 255 / np.nanmax(depth_img)).astype(np.uint8)
+
+    """Reflectance Image"""
+    refl *= 255
+    refl_img = np.zeros(img_dims, dtype=np.uint8)
+    for i in range(pc_pixels.shape[0]):
+        x, y = pc_pixels[i, :]
+        x, y = int(x), int(y)
+        refl_img[y - fill_rad:y + fill_rad, x - fill_rad:x + fill_rad] = refl[i]
+    refl_img = cv.blur(refl_img, (3, 3))
+
+    """Blend Image"""
+    blend_img = cv.addWeighted(depth_img, alpha_depth, refl_img, alpha_refl, 0)
+    return blend_img
