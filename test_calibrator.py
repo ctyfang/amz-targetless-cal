@@ -20,15 +20,15 @@ cfg.pc_dir = input_dir
 cfg.img_dir = input_dir
 cfg.calib_dir = calib_dir
 
-cfg.frames = [48, 64, 77, 224, 266, 374, 428]
+cfg.frames = [34, 1, 6, 19, 257, 185]
 cfg.im_ed_score_thr1 = 100
 cfg.im_ed_score_thr2 = 200
 
 cfg.pc_ed_score_thr = 0.275
 
 # Create calibrator and detect edges from scratch
-calibrator = CameraLidarCalibrator(cfg, visualize=False)
-with open('./output/calibrator_3dv_kitti_2011_09_26_static_scenes_thr1_100_thr2_200_thr_0p275.pkl', 'wb') as output_pkl:
+calibrator = CameraLidarCalibrator(cfg, visualize=True)
+with open('generated/calibrators/0928-6frames-corresps.pkl', 'wb') as output_pkl:
     pickle.dump(calibrator, output_pkl, pickle.HIGHEST_PROTOCOL)
 
 # Load calibrator with detected edges from pickled object

@@ -58,6 +58,7 @@ for offset_idx in range(3):
     for [idx, val] in tqdm(enumerate(offset_vals)):
         tau_temp = deepcopy(tau_gt)
         tau_temp[base_idx+offset_idx] += val
+        tau_temp = np.divide(tau_temp, tau_scales)
 
         curr_cost = loss_scaled(tau_temp, calibrator,
                                  opt_params['SIGMAS'][stage_idx],

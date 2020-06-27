@@ -1,24 +1,17 @@
 """Top-level class for Calibration"""
-import matplotlib.pyplot as plt
+
 import numpy as np
 import cv2 as cv
 from pyquaternion import Quaternion
 import gc
 import itertools as iter
 from datetime import datetime
+import matplotlib.pyplot as plt
 
-from scipy.ndimage.filters import gaussian_filter, convolve
-from scipy.optimize import least_squares, minimize, root, differential_evolution, basinhopping
-from scipy.stats import multivariate_normal, gaussian_kde, entropy, norm
+from scipy.optimize import least_squares, minimize, basinhopping
+from scipy.stats import multivariate_normal, entropy
 from scipy.spatial.ckdtree import cKDTree
-from sklearn.feature_selection import mutual_info_regression
-from sklearn.metrics import mutual_info_score
-from scipy.linalg import expm
-from matplotlib.colors import BoundaryNorm
-from matplotlib.ticker import MaxNLocator
-import scipy.optimize as optimize
 from KDEpy import FFTKDE
-from scipy.interpolate import griddata
 
 from calibration.img_edge_detector import ImgEdgeDetector
 from calibration.pc_edge_detector import PcEdgeDetector
@@ -724,27 +717,28 @@ class CameraLidarCalibrator:
         for i in range(len(self.projection_mask)):
             self.numpoints_preopt.append(np.sum(self.projection_mask[i]))
 
-        # self.tau_ord_mags = np.log10(np.abs(self.tau))
         self.tau_ord_mags = np.asarray([1, 1, 1, -2, -2, -2])
         self.tau_ord_mags = np.power(10 * np.ones(self.tau.shape),
                                      self.tau_ord_mags)
 
+        simplex_deltas = [0.05, 0.05, 0.05, 0.5, 0.5, 0.5]
         opt_options = {'disp': True, 'maxiter': maxiter, 'adaptive': True,
                        'ftol': 1e-1, 'xtol': 1e-5, 'gtol': 1e-3,
-                       'finite_diff_rel_step': 1e-4}
+                       'finite_diff_rel_step': 1e-4,
+                       'initial_simplex': get_mixed_delta_simplex(self.tau,
+                                                                  simplex_deltas,
+                                                                  scales=self.tau_ord_mags)}
         self.num_iterations = 0
         self.tau_preoptimize = self.tau
         self.opt_save_every = save_every
 
         def loss_callback(xk, state=None):
-            # print(xk*self.tau_ord_mags)
             self.num_iterations += 1
-            plt.figure()
-            plt.plot(cost_history)
-            plt.show()
-
-            # if total_valid_points < 10000:
-            #     raise BadProjection
+            if len(cost_history):
+                plt.close('all')
+                plt.figure()
+                plt.plot(cost_history)
+                plt.savefig('current_loss.png')
 
             if self.num_iterations % self.opt_save_every == 0:
                 img = self.draw_all_points()
@@ -915,7 +909,7 @@ def loss_scaled(tau, calibrator, sigma_in, alpha_mi, alpha_gmm,
     total_cost = sum(cost_components)
     cost_history.append(total_cost)
 
-    print(cost_components)
+    # print(cost_components)
     if return_components:
         return cost_components
     else:

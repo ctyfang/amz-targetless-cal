@@ -8,16 +8,21 @@ import pickle
 import json
 from prettytable import PrettyTable
 
+cv.dista
 """Script parameters"""
 calibrator_path = '../generated/calibrators/0928-6frames-corresps.pkl'
 select_new_correspondences = False
-LOG_DIR = '../generated/optimizer_logs/test'
+LOG_DIR = '../generated/optimizer_logs/0928-6frames-corresps-allcosts'
 
 """Experiment parameters"""
-exp_params = {'NUM_SAMPLES': 40, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
+exp_params = {'NUM_SAMPLES': 3, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
               'ALPHA_MI': [300.0, 300.0], 'ALPHA_GMM': [10.0, 10.0],
-              'ALPHA_CORR': [1e-1, 1.5e-1], 'SIGMAS': [2.5, 1],
-              'MAX_ITERS': 100}
+              'ALPHA_CORR': [1e-1, 1.25e-1], 'SIGMAS': [2.5, 1.0],
+              'MAX_ITERS': 200}
+# exp_params = {'NUM_SAMPLES': 3, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
+#               'ALPHA_MI': [0], 'ALPHA_GMM': [0],
+#               'ALPHA_CORR': [1], 'SIGMAS': [1.0],
+#               'MAX_ITERS': 200}
 
 """Calibration directory specification"""
 calib_dir_list = ['/media/carter/Samsung_T5/3dv/2011_09_28/calibration',
@@ -99,21 +104,21 @@ for sample_idx in range(exp_params['NUM_SAMPLES']):
             exp_params['ALPHA_MI'][stage_idx], \
             exp_params['ALPHA_CORR'][stage_idx]
 
-        if stage_idx == 0:
-            tau_opt, cost_history = calibrator.ls_optimize(sigma_in,
-                                                           alpha_gmm=alpha_gmm,
-                                                           alpha_mi=alpha_mi,
-                                                           alpha_corr=alpha_corr,
-                                                           maxiter=exp_params['MAX_ITERS'],
-                                                           save_every=10)
 
-        else:
-            tau_opt, cost_history = calibrator.ls_optimize_translation(sigma_in,
-                                                           alpha_gmm=alpha_gmm,
-                                                           alpha_mi=alpha_mi,
-                                                           alpha_corr=alpha_corr,
-                                                           maxiter=exp_params['MAX_ITERS'],
-                                                           save_every=10)
+        tau_opt, cost_history = calibrator.ls_optimize(sigma_in,
+                                                       alpha_gmm=alpha_gmm,
+                                                       alpha_mi=alpha_mi,
+                                                       alpha_corr=alpha_corr,
+                                                       maxiter=exp_params['MAX_ITERS'],
+                                                       save_every=10)
+
+        # else:
+        #     tau_opt, cost_history = calibrator.ls_optimize_translation(sigma_in,
+        #                                                    alpha_gmm=alpha_gmm,
+        #                                                    alpha_mi=alpha_mi,
+        #                                                    alpha_corr=alpha_corr,
+        #                                                    maxiter=exp_params['MAX_ITERS'],
+        #                                                    save_every=10)
 
         calibrator.tau = tau_opt
         compare_taus(tau_gt, tau_opt)
@@ -141,13 +146,15 @@ for sample_idx in range(exp_params['NUM_SAMPLES']):
         cv.imwrite(os.path.join(LOG_DIR, f'trial_{sample_idx}', f'stage_{stage_idx}',
                                 f'edge_points_frame_{frame_idx}.jpg'), img_edges)
 
-
-"""Plot deviation of solutions wrt ground-truth"""
+"""Save initial taus, optimized taus, tau_scale"""
 tau_inits = np.asarray(tau_inits)
 np.save(os.path.join(LOG_DIR, 'tau_inits'), tau_inits)
 
 tau_data = np.asarray(tau_data)
 np.save(os.path.join(LOG_DIR, 'tau_data'), tau_data)
+
+np.save(os.path.join(LOG_DIR, 'tau_scales'), calibrator.tau_ord_mags)
+
 
 plt.figure()
 plt.clf()
