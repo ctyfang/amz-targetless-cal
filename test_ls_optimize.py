@@ -50,17 +50,15 @@ print(len(calibrator.img_detector.imgs))
 # sys.exit()
 # print(calibrator.compute_bf_cost(120))
 sigma = 6.0
-hm_ptc = calibrator.compute_heat_map(sigma=sigma, frame=0,
-                                     ptCloud=True, show=True)
-hm_img = calibrator.compute_heat_map(sigma=sigma, frame=0,
-                                     ptCloud=False, show=True)
+hm_ptc = calibrator.dist_transform(frame=0, show=True)
+sys.exit()
 error = np.linspace(0, 0.01, 10)
 cost_history = []
-print(calibrator.batch_optimization(sigma_in=sigma))
-hm_ptc = calibrator.compute_heat_map(sigma=sigma, frame=0,
-                                     ptCloud=True, show=True)
-hm_img = calibrator.compute_heat_map(sigma=sigma, frame=0,
-                                     ptCloud=False, show=True)
+# print(calibrator.batch_optimization(sigma_in=sigma))
+# hm_ptc = calibrator.compute_heat_map(sigma=sigma, frame=0,
+#                                      ptCloud=True, show=True)
+# hm_img = calibrator.compute_heat_map(sigma=sigma, frame=0,
+#                                      ptCloud=False, show=True)
 # for i in range(len(calibrator.img_detector.imgs)):
 # for i in range (10):
     # calibrator.tau[2] += 0.001

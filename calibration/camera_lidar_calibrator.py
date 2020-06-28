@@ -215,7 +215,7 @@ class CameraLidarCalibrator:
                              depth_valid, (grid_x, grid_y),
                              method='linear').T
 
-        depth_img = (depth_img * 255 / np.nanmax(depth_img)).astype(np.uint8)
+        depth_img = (depth_img * 255).astype(np.uint8)
         if show:
             cv.imshow('Depth image with linear interpolation', depth_img)
             cv.waitKey(0)
@@ -676,13 +676,8 @@ class CameraLidarCalibrator:
             calibrator.project_point_cloud()
             # print(len(calibrator.projected_points))
             for i in range(len(calibrator.img_detector.imgs)):
-                hm_ptc = calibrator.compute_heat_map(
-                    sigma=sigma, frame=i, ptCloud=True)
-                hm_img = calibrator.compute_heat_map(
-                    sigma=sigma, frame=i, ptCloud=False)
-                diff = hm_img - hm_ptc
-                # cost = -np.linalg.norm(diff, ord=2)
-                local_cost.append(np.linalg.norm(diff, ord=2))
+                local_cost.append(
+                    calibrator.compute_heat_map(sigma=sigma, frame=i))
 
             cost_history.append(np.sum(local_cost))
 
@@ -715,10 +710,6 @@ class CameraLidarCalibrator:
 
         print(f"Batch optimizer time={time.time() - start}")
 
-        # fig, ax = plt.subplots(len(self.img_detector.imgs))
-        # # sys.exit()
-        # for i in range(len(ax)):
-        #     ax[i].plot(range(len(cost_history)), cost_history[:, i])
         plt.show()
         img = self.draw_all_points(frame=0)
         cv.imwrite('generated/'+ str(self.num_iterations) + '.jpg', img)
@@ -728,44 +719,43 @@ class CameraLidarCalibrator:
     def compute_heat_map(self,
                          sigma,
                          frame=-1,
-                         ptCloud=False,
                          show=False):
         """Compute heat map"""
         # start_t = time.time()
-        cost_map = np.zeros(self.img_detector.img_edge_scores[frame].shape)
+        cost_map_ptc = np.zeros(self.img_detector.img_edge_scores[frame].shape)
+        cost_map_img = np.zeros(self.img_detector.img_edge_scores[frame].shape)
         gauss2d = getGaussianKernel2D(sigma, False)
-        if ptCloud:
-            for idx_pc in range(self.pc_detector.pcs_edge_idxs[frame].shape[0]):
 
-                idx = self.pc_detector.pcs_edge_idxs[frame][idx_pc]
+        for idx_pc in range(self.pc_detector.pcs_edge_idxs[frame].shape[0]):
 
-                # check if projected projected point lands within image bounds
-                if not self.projection_mask[frame][idx]:
-                    continue
+            idx = self.pc_detector.pcs_edge_idxs[frame][idx_pc]
 
-                mu_x, mu_y = self.projected_points[frame][idx].astype(np.int)
-                # Get gaussian kernel
-                # Distance > 3 sigma is set to 0
-                # and normalized so that the total Kernel = 1
+            # check if projected projected point lands within image bounds
+            if not self.projection_mask[frame][idx]:
+                continue
 
-                top, bot, left, right = get_boundry(
-                    self.img_detector.img_edge_scores[frame], (mu_y, mu_x),
-                    int(sigma))
+            mu_x, mu_y = self.projected_points[frame][idx].astype(np.int)
+            # Get gaussian kernel
+            # Distance > 3 sigma is set to 0
+            # and normalized so that the total Kernel = 1
 
-                kernel_patch = gauss2d[3 * int(sigma) - top:3 * int(sigma) +
-                                       bot, 3 * int(sigma) -
-                                       left:3 * int(sigma) + right].copy()
+            top, bot, left, right = get_boundry(
+                self.img_detector.img_edge_scores[frame], (mu_y, mu_x),
+                int(sigma))
 
-                # Normalize by number of edge projected_points in the neighborhood
-                cost_map[mu_y - top:mu_y + bot,
+            kernel_patch = gauss2d[3 * int(sigma) - top:3 * int(sigma) +
+                                    bot, 3 * int(sigma) -
+                                    left:3 * int(sigma) + right].copy()
+
+            # Normalize by number of edge projected_points in the neighborhood
+            cost_map_ptc[mu_y - top:mu_y + bot,
                          mu_x - left:mu_x + right] += kernel_patch
-            threshold = np.amax(gauss2d)
-            cost_map[cost_map < threshold] = 0
-            if show:
-                plot_2d(cost_map,
-                        figname='generated/heat_map_ptc_{}'.format(frame))
-            gc.collect()
-            return cost_map
+        threshold = np.amax(gauss2d)
+        cost_map_ptc[cost_map_ptc < threshold] = 0
+        if show:
+            plot_2d(cost_map_ptc,
+                    figname='generated/heat_map_ptc_{}'.format(frame))
+        gc.collect()
 
         for mu_x in range(self.img_detector.imgs_edges[frame].shape[1]):
             for mu_y in range(self.img_detector.imgs_edges[frame].shape[0]):
@@ -781,15 +771,50 @@ class CameraLidarCalibrator:
                                        bot, 3 * int(sigma) -
                                        left:3 * int(sigma) + right].copy()
 
-                cost_map[mu_y - top:mu_y + bot,
-                         mu_x - left:mu_x + right] += kernel_patch
+                cost_map_img[mu_y - top:mu_y + bot,
+                             mu_x - left:mu_x + right] += kernel_patch
 
         threshold = np.amax(gauss2d)
-        cost_map[cost_map < threshold] = 0
+        cost_map_img[cost_map_img < threshold] = 0
         if show:
-            plot_2d(cost_map, figname='generated/heat_map_img_{}'.format(frame))
+            plot_2d(cost_map_img,
+                    figname='generated/heat_map_img_{}'.format(frame))
         gc.collect()
-        return cost_map
+        diff = cost_map_img - cost_map_ptc
+        return np.linalg.norm(diff, ord=2)
+
+    def dist_transform(self, frame=-1, show=True):
+        # edge0 = self.img_detector.img_edge_scores[frame].copy()*255
+        # edge0 = edge0.astype(np.uint8)
+
+        edge0 = cv2.cvtColor(self.img_detector.imgs[frame].copy(), cv2.COLOR_BGR2GRAY)
+
+        _, bw = cv.threshold(edge0, 40, 255, cv.THRESH_BINARY | cv.THRESH_OTSU)
+        cv.imshow('Binary Image', bw)
+        
+        # Perform the distance transform algorithm
+        dist0 = cv.distanceTransform(bw, cv.DIST_L2, 3)
+        # Normalize the distance image for range = {0.0, 1.0}
+        # so we can visualize and threshold it
+        cv.normalize(dist0, dist0, 0, 1.0, cv.NORM_MINMAX)
+
+        edge1 = self.draw_depth_image(frame)
+
+        dist1 = cv.distanceTransform(edge1, cv.DIST_L2, 5)
+        cv.normalize(dist1, dist1, 0, 1.0, cv.NORM_MINMAX)
+
+        dist_0 = np.hstack((edge1, dist1))
+        dist_1 = np.hstack((edge0, dist0))
+
+        dist_2 = np.vstack((dist_1, dist_0))
+        cv.imshow('Image edge and corresponding distance transform', dist_2)
+        cv.waitKey(0)
+        cv.destroyAllWindows()
+        cv.imshow('img_dep_dist_transform', np.hstack((dist0, dist1)))
+        cv.waitKey(0)
+        cv.destroyAllWindows()
+        cv.imwrite('generated/img_dep_dist_tranform.png', np.hstack((dist0, dist1))*255)
+        sys.exit()
 
 
 def loss_scaled(tau, calibrator, sigma_in, alpha_mi, alpha_gmm, cost_history,
