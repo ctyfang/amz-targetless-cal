@@ -242,14 +242,18 @@ def get_boundry(image, center, sigma):
     return top, bot, left, right
 
 
-def plot_2d(values):
+def plot_2d(values, figname=None):
     y = range(values.shape[0]+1)
     x = range(values.shape[1]+1)
     levels = MaxNLocator(nbins=15).tick_values(np.amin(values),
                                                np.amax(values))
     cmap = plt.get_cmap('hot')
     norm = BoundaryNorm(levels, ncolors=cmap.N, clip=True)
-    fig, ax0 = plt.subplots(nrows=1)
+
+    scale = np.power(10, np.log10(max(values.shape)).astype(int)-1)
+
+    fig = plt.figure(figsize=values.T.shape[:2]/scale)
+    ax0 = fig.add_subplot(111)
     plot = ax0.pcolormesh(x,
                           y,
                           values[::-1, :],
@@ -257,8 +261,13 @@ def plot_2d(values):
                           norm=norm)
     fig.colorbar(plot, ax=ax0)
     ax0.set_title('pcolormesh with levels')
+    ax0.set_xlim(0, values.shape[1])
+    ax0.set_ylim(0, values.shape[0])
     plt.axis('equal')
-    plt.show()
+    if figname is not None:
+        plt.savefig(figname)
+    plt.pause(3)
+    plt.close()
 
 
 def getGaussianKernel2D(sigma, visualize=False):
