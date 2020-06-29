@@ -311,6 +311,30 @@ class CameraLidarCalibrator:
 
         return depth_img
 
+    def draw_edge_points_binary(self,
+                                 frame=-1,
+                                 show=False):
+        """
+        Draw only edge points within corresponding camera's FoV.
+        """
+
+        image = np.zeros((self.img_detector.img_h, self.img_detector.img_w),
+                         dtype=np.bool)
+
+        projected_points_valid = self.projected_points[frame][np.logical_and(
+            self.projection_mask[frame],
+            self.pc_detector.pcs_edge_masks[frame])]
+
+        for pixel in projected_points_valid:
+            image[pixel[1].astype(np.int), pixel[0].astype(np.int)] = True
+
+        if show:
+            cv.imshow('Projected Edge Points on Image', image)
+            cv.waitKey(0)
+            cv.destroyAllWindows()
+
+        return image
+
     def draw_edge_points(self,
                          score=None,
                          image=None,
@@ -419,50 +443,6 @@ class CameraLidarCalibrator:
         # max distance is 120m but usually not usual
         return (((dist - min_d) / (max_d - min_d)) * 120).astype(np.uint8)
 
-    def compute_bf_cost(self, sigma_in):
-        """Compute cost for the current tau (extrinsics)"""
-        start_t = time.time()
-
-        # GMM Cost
-        cost = 0
-        # iterate over lidar edge points
-        for idx in range(self.pc_detector.pcs_edge_idxs.shape[0]):
-            pt_idx = self.pc_detector.pcs_edge_idxs[idx]
-
-            # check if projected point lands within image bounds
-            if self.projection_mask[pt_idx]:
-
-                # lidar edge weight
-                w_i = self.pc_detector.pcs_edge_scores[pt_idx]
-
-                # gaussian parameters
-                mu = self.projected_points[pt_idx, :]
-                sigma = sigma_in / \
-                        np.linalg.norm(self.pc_detector.pcs[pt_idx, :])
-                cov_mat = np.diag([sigma, sigma])
-
-                # neighborhood params
-                min_x = max(0, int(mu[0] - 3 * sigma))
-                max_x = min(self.img_detector.img_w, int(mu[0] + 3 * sigma))
-                min_y = max(0, int(mu[1] - 3 * sigma))
-                max_y = min(self.img_detector.img_h, int(mu[1] + 3 * sigma))
-                num_ed_projected_points = np.sum(
-                    self.img_detector.imgs_edges[min_y:max_y, min_x:max_x])
-
-                # iterate over 3-sigma neighborhood
-                for x in range(min_x, max_x):
-                    for y in range(min_y, max_y):
-
-                        # check if current img pixel is an edge pixel
-                        if self.img_detector.imgs_edges[y, x]:
-                            w_j = self.img_detector.img_edge_scores[y, x]
-                            w_ij = 0.5 * (w_i + w_j) / num_ed_projected_points
-                            cost += w_ij * \
-                                    multivariate_normal.pdf([x, y], mu, cov_mat)
-        gc.collect()
-        # print(f"Brute Force cost computation time:{time.time() - start_t}")
-        return -cost
-
     @staticmethod
     def gaussian_pdf(u, v, sigma, mu=0):
         """Compute P(d) according to the 1d gaussian pdf"""
@@ -567,7 +547,6 @@ class CameraLidarCalibrator:
                             gradient = gradient + \
                                        w_ij * ((dG_du * du_dtau) + (
                                         dG_dv * dv_dtau))
-
         return -gradient
 
     def compute_mi_cost(self, frame=-1):
@@ -699,6 +678,24 @@ class CameraLidarCalibrator:
                 total_dist += (dist**2)
         average_dist = total_dist/num_corresp
         return -dist_offset + 3*average_dist
+
+    def compute_chamfer_dists(self):
+
+        total_dist = 0
+        total_edge_pts = 0
+        for frame_idx in range(self.num_frames):
+            cam_edges = self.img_detector.imgs_edges[frame_idx]
+            cam_edges_inv = 255*np.logical_not(cam_edges).astype(np.uint8)
+            cam_dist_map = cv.distanceTransform(cam_edges_inv, cv.DIST_L2,
+                                                cv.DIST_MASK_PRECISE)
+            lid_edges = self.draw_edge_points_binary(frame_idx)
+            num_edge_pts = lid_edges.sum()
+            dist = np.multiply(lid_edges, cam_dist_map).sum()
+
+            total_dist += dist
+            total_edge_pts += num_edge_pts
+
+        return total_dist/total_edge_pts
 
     def ls_optimize(self,
                     sigma_in,
@@ -898,18 +895,24 @@ def loss_scaled(tau, calibrator, sigma_in, alpha_mi, alpha_gmm,
         calibrator.tau = np.multiply(calibrator.tau, tau_scales)
 
     calibrator.project_point_cloud()
-    cost_components = np.zeros((3, 1))
+    cost_components = np.zeros((4, 1))
 
     for frame_idx in range(calibrator.num_frames):
-        cost_components[0] += (alpha_mi * calibrator.compute_mi_cost(frame_idx))
-        cost_components[1] += (alpha_gmm * calibrator.compute_conv_cost(
-                               sigma_in, frame_idx))
-        cost_components[2] += alpha_corr * calibrator.compute_corresp_cost()
+        if alpha_mi:
+            cost_components[0] += (alpha_mi * calibrator.compute_mi_cost(frame_idx))
+
+        if alpha_gmm:
+            cost_components[1] += (alpha_gmm * calibrator.compute_conv_cost(
+                                   sigma_in, frame_idx))
+
+        if alpha_corr:
+            cost_components[2] += alpha_corr * calibrator.compute_corresp_cost()
+        cost_components[3] += calibrator.compute_chamfer_dists()
 
     total_cost = sum(cost_components)
     cost_history.append(total_cost)
 
-    # print(cost_components)
+    print(cost_components)
     if return_components:
         return cost_components
     else:

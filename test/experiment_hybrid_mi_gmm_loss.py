@@ -8,21 +8,22 @@ import pickle
 import json
 from prettytable import PrettyTable
 
-cv.dista
+
 """Script parameters"""
 calibrator_path = '../generated/calibrators/0928-6frames-corresps.pkl'
 select_new_correspondences = False
-LOG_DIR = '../generated/optimizer_logs/0928-6frames-corresps-allcosts'
+LOG_DIR = '../generated/optimizer_logs/0928-6frames-chamfer+mi'
+save_every = 2
 
 """Experiment parameters"""
-exp_params = {'NUM_SAMPLES': 3, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
-              'ALPHA_MI': [300.0, 300.0], 'ALPHA_GMM': [10.0, 10.0],
-              'ALPHA_CORR': [1e-1, 1.25e-1], 'SIGMAS': [2.5, 1.0],
-              'MAX_ITERS': 200}
 # exp_params = {'NUM_SAMPLES': 3, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
-#               'ALPHA_MI': [0], 'ALPHA_GMM': [0],
-#               'ALPHA_CORR': [1], 'SIGMAS': [1.0],
+#               'ALPHA_MI': [300.0, 300.0], 'ALPHA_GMM': [10.0, 10.0],
+#               'ALPHA_CORR': [1e-1, 1.25e-1], 'SIGMAS': [2.5, 1.0],
 #               'MAX_ITERS': 200}
+exp_params = {'NUM_SAMPLES': 3, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
+              'ALPHA_MI': [20], 'ALPHA_GMM': [0],
+              'ALPHA_CORR': [1e-3], 'SIGMAS': [1.0],
+              'MAX_ITERS': 100}
 
 """Calibration directory specification"""
 calib_dir_list = ['/media/carter/Samsung_T5/3dv/2011_09_28/calibration',
@@ -110,7 +111,7 @@ for sample_idx in range(exp_params['NUM_SAMPLES']):
                                                        alpha_mi=alpha_mi,
                                                        alpha_corr=alpha_corr,
                                                        maxiter=exp_params['MAX_ITERS'],
-                                                       save_every=10)
+                                                       save_every=save_every)
 
         # else:
         #     tau_opt, cost_history = calibrator.ls_optimize_translation(sigma_in,
