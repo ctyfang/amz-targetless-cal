@@ -45,18 +45,30 @@ def getPath(list_of_paths):
     sys.exit()
 
 
-def load_from_bin(bin_path):
+def load_from_bin(bin_path, incl_refl=False):
     # load point cloud from a binary file
     obj = np.fromfile(bin_path, dtype=np.float32).reshape(-1, 4)
-    # ignore reflectivity info
-    return obj[:, :3]
+
+    if incl_refl:
+        return obj
+    else:
+        return obj[:, :3]
 
 
-def load_from_csv(csv_path, delimiter=',', skip_header=0):
+def load_from_csv(path, delimiter=',', skip_header=0, incl_refl=False):
     # load point cloud from a csv file
-    obj = np.genfromtxt(csv_path, delimiter=delimiter, skip_header=skip_header)
-    # ignore unnecessary indices in first column
-    return obj[:, 1:4]
+    _, ext = os.path.splitext(path)
+    if ext == '.csv':
+        obj = np.genfromtxt(path, delimiter=delimiter,
+                            skip_header=skip_header)
+        return obj[:, 1:4]
+
+    elif ext == '.txt':
+        obj = np.genfromtxt(path, skip_header=skip_header)
+        return obj[:, :]
+
+    else:
+        print("Unsupported extension for pc data.")
 
 
 def depth_color(val, min_d=0, max_d=120):
@@ -250,3 +262,39 @@ def get_trans_bounds(trans_vec, trans_range=0.25):
     z_bounds = [trans_vec[2] - trans_range, trans_vec[2] + trans_range]
 
     return [x_bounds, y_bounds, z_bounds]
+
+
+def get_initial_simplex(x0, nonzdelt=0.05, zdelt=0.00025):
+
+    D = np.max(x0.shape)
+    simplex = np.zeros((D+1, D))
+    simplex[0, :] = x0
+
+    for i in range(0, D):
+        x = x0.copy()
+        if x[i] == 0:
+            x[i] = (1 + zdelt)*x[i]
+        else:
+            x[i] = (1 + nonzdelt)*x[i]
+        simplex[i+1, :] = x
+    return simplex
+
+
+def get_mixed_delta_simplex(x0, deltas, zdelt=[0.00025, 0.00025, 0.00025,
+                                               0.00025, 0.00025, 0.00025],
+                            scales=np.ones((1, 6))):
+
+    D = np.max(x0.shape)
+    simplex = np.zeros((D+1, D))
+    simplex[0, :] = np.divide(x0, scales)
+
+    for i in range(0, D):
+        x = x0.copy()
+        if x[i] == 0:
+            x[i] = (1 + zdelt[i])*x[i]
+        else:
+            x[i] = (1 + deltas[i])*x[i]
+
+        x = np.divide(x, scales)
+        simplex[i+1, :] = x
+    return simplex

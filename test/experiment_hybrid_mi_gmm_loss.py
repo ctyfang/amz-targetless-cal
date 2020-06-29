@@ -8,15 +8,22 @@ import pickle
 import json
 from prettytable import PrettyTable
 
+
 """Script parameters"""
-calibrator_path = '../generated/calibrators/0928-frame34-sed-pcthresh60.pkl'
-LOG_DIR = '../generated/optimizer_logs/test'
+calibrator_path = '../generated/calibrators/0928-6frames-corresps.pkl'
+select_new_correspondences = False
+LOG_DIR = '../generated/optimizer_logs/0928-6frames-chamfer+mi'
+save_every = 2
 
 """Experiment parameters"""
-exp_params = {'NUM_SAMPLES': 2, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
-              'ALPHA_MI': [80.0], 'ALPHA_GMM': [1.0], 'ALPHA_POINTS': [1e-3],
-              'SIGMAS': [10.0],
-              'MAX_ITERS': 50}
+# exp_params = {'NUM_SAMPLES': 3, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
+#               'ALPHA_MI': [300.0, 300.0], 'ALPHA_GMM': [10.0, 10.0],
+#               'ALPHA_CORR': [1e-1, 1.25e-1], 'SIGMAS': [2.5, 1.0],
+#               'MAX_ITERS': 200}
+exp_params = {'NUM_SAMPLES': 3, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
+              'ALPHA_MI': [20], 'ALPHA_GMM': [0],
+              'ALPHA_CORR': [1e-3], 'SIGMAS': [1.0],
+              'MAX_ITERS': 100}
 
 """Calibration directory specification"""
 calib_dir_list = ['/media/carter/Samsung_T5/3dv/2011_09_28/calibration',
@@ -42,6 +49,12 @@ R, T = load_lid_cal(calib_dir)
 tau_gt = calibrator.tau = calibrator.transform_to_tau(R, T)
 exp_params['tau_gt'] = tau_gt.tolist()
 
+"""Select correspondences and save calibrator"""
+if select_new_correspondences:
+    calibrator.select_correspondences()
+    with open(calibrator_path, 'wb') as overwrite_pkl:
+        pickle.dump(calibrator, overwrite_pkl)
+
 """Create log directory and save GT projections"""
 os.makedirs(LOG_DIR, exist_ok=True)
 with open(os.path.join(LOG_DIR, 'params.json'), 'w') as json_file:
@@ -61,9 +74,10 @@ tau_data = []
 tau_inits = []
 for sample_idx in range(exp_params['NUM_SAMPLES']):
     print(f'----- SAMPLE {sample_idx} -----')
-    calibrator.tau = perturb_tau(tau_gt,
+    calibrator.update_extrinsics(perturb_tau(tau_gt,
                                  trans_std=exp_params['TRANS_ERR_SIGMA'],
-                                 angle_std=exp_params['ANGLE_ERR_SIGMA'])
+                                 angle_std=exp_params['ANGLE_ERR_SIGMA']))
+    # calibrator.select_correspondences()
     compare_taus(tau_gt, calibrator.tau)
 
     calibrator.project_point_cloud()
@@ -84,23 +98,37 @@ for sample_idx in range(exp_params['NUM_SAMPLES']):
                                 f'edge_points_{sample_idx}_frame_{frame_idx}.jpg'), img_edges)
 
     """Run optimizer"""
-    stage_idx = 0
-    sigma_in, alpha_gmm, alpha_mi = exp_params['SIGMAS'][stage_idx], \
-                                    exp_params['ALPHA_GMM'][stage_idx], \
-                                    exp_params['ALPHA_MI'][stage_idx]
+    for stage_idx in range(len(exp_params["SIGMAS"])):
+        sigma_in, alpha_gmm, alpha_mi, alpha_corr = \
+            exp_params['SIGMAS'][stage_idx], \
+            exp_params['ALPHA_GMM'][stage_idx], \
+            exp_params['ALPHA_MI'][stage_idx], \
+            exp_params['ALPHA_CORR'][stage_idx]
 
-    tau_opt, cost_history = calibrator.ls_optimize(sigma_in,
-                                                   alpha_gmm=alpha_gmm,
-                                                   alpha_mi=alpha_mi,
-                                                   maxiter=exp_params['MAX_ITERS'],
-                                                   save_every=10)
+
+        tau_opt, cost_history = calibrator.ls_optimize(sigma_in,
+                                                       alpha_gmm=alpha_gmm,
+                                                       alpha_mi=alpha_mi,
+                                                       alpha_corr=alpha_corr,
+                                                       maxiter=exp_params['MAX_ITERS'],
+                                                       save_every=save_every)
+
+        # else:
+        #     tau_opt, cost_history = calibrator.ls_optimize_translation(sigma_in,
+        #                                                    alpha_gmm=alpha_gmm,
+        #                                                    alpha_mi=alpha_mi,
+        #                                                    alpha_corr=alpha_corr,
+        #                                                    maxiter=exp_params['MAX_ITERS'],
+        #                                                    save_every=10)
+
+        calibrator.tau = tau_opt
+        compare_taus(tau_gt, tau_opt)
+        calibrator.project_point_cloud()
 
     """Save results from this optimization stage"""
-    calibrator.tau = tau_opt
-    calibrator.project_point_cloud()
-    compare_taus(tau_gt, tau_opt)
+    tau_data.append(tau_opt)
 
-    """Save projections with optimized tau"""
+    """Save projections with final optimized tau"""
     os.makedirs(os.path.join(LOG_DIR, f'trial_{sample_idx}', f'stage_{stage_idx}'), exist_ok=True)
     plt.figure()
     plt.title('Loss history')
@@ -119,13 +147,15 @@ for sample_idx in range(exp_params['NUM_SAMPLES']):
         cv.imwrite(os.path.join(LOG_DIR, f'trial_{sample_idx}', f'stage_{stage_idx}',
                                 f'edge_points_frame_{frame_idx}.jpg'), img_edges)
 
-
-"""Plot deviation of solutions wrt ground-truth"""
+"""Save initial taus, optimized taus, tau_scale"""
 tau_inits = np.asarray(tau_inits)
 np.save(os.path.join(LOG_DIR, 'tau_inits'), tau_inits)
 
 tau_data = np.asarray(tau_data)
 np.save(os.path.join(LOG_DIR, 'tau_data'), tau_data)
+
+np.save(os.path.join(LOG_DIR, 'tau_scales'), calibrator.tau_ord_mags)
+
 
 plt.figure()
 plt.clf()
