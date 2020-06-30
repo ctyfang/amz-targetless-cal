@@ -15,22 +15,25 @@ def command_line_parser():
 
     parser.add_argument(
         '--pc_subsample', type=float, default=1.0,
-        help='Subsampling fraction for the pointcloud to reduce computation while debugging')
+        help='Subsampling fraction for the pointcloud to reduce computation '
+             'while debugging')
 
     parser.add_argument(
         '--pc_ed_rad_nn', type=float, default=0.1,
-        help='Radius in which to include neighbors during point cloud edge detection')
+        help='Radius in which to include neighbors during point cloud edge '
+             'detection')
 
     parser.add_argument(
         '--pc_ed_num_nn', type=float, default=75,
         help='Min number of nearest neighbors used')
 
     parser.add_argument(
-        '--pc_ed_score_thr', type=float, default=0.35,
-        help='Threshold above which points are considered edge points')
+        '--pc_ed_score_thr', type=float, default=60,
+        help='Percentile threshold above which points are considered edge '
+             'points')
 
     parser.add_argument(
-        '--pc_ed_method', type=str, default='sed',
+        '--im_ed_method', type=str, default='sed',
         help='Method used for image edge detection: sed or canny')
 
     parser.add_argument(

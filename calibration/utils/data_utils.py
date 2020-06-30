@@ -289,7 +289,7 @@ def get_mixed_delta_simplex(x0, deltas, zdelt=[0.00025, 0.00025, 0.00025,
     simplex[0, :] = np.divide(x0, scales)
 
     for i in range(0, D):
-        x = x0.copy()
+        x = np.squeeze(x0).copy()
         if x[i] == 0:
             x[i] = (1 + zdelt[i])*x[i]
         else:

@@ -12,6 +12,9 @@ from glob import glob
 
 
 class PcEdgeDetector:
+    """Helper class for Calibrator. Load pointcloud files from .bin's,
+    run edge-detection, and generate masks to extract edge points for
+    projection during optimization."""
 
     def __init__(self, cfg, visualize=True):
         self.pcs, self.reflectances = self.load_pcs(cfg.pc_dir,
@@ -27,13 +30,13 @@ class PcEdgeDetector:
         self.PC_ED_NUM_NN = cfg.pc_ed_num_nn
         self.PC_NUM_CHANNELS = 64
 
-    def pc_detect(self, pcs_cam_frame, thresh=0.6, num_nn=100, rad_nn=0.1, visualize=False):
+    def pc_detect(self, pcs_cam_frame, thresh=60, num_nn=100, rad_nn=0.1,
+                  visualize=False):
         """
         Compute edge scores for pointcloud
         Get edge points via thresholding
         """
 
-        # TODO: Be able to process several point clouds
         # Init outputs
         for pc, pc_cam_frame in zip(self.pcs, pcs_cam_frame):
             num_points = pc.shape[0]
@@ -97,12 +100,13 @@ class PcEdgeDetector:
             print(f"Total pc scoring time:{time.time() - start_t}")
 
             # Remove all points with an edge score below the threshold
-            thresh = np.percentile(pc_edge_scores, 60)
+            thresh = np.percentile(pc_edge_scores, thresh)
             self.pcs_edge_masks.append(self.pcs_edge_scores[-1] > thresh)
             # Exclude boundary points in final thresholding
             pc_boundary_idxs = self.get_first_and_last_channels_idxs(pc)
             self.pcs_edge_masks[-1][pc_boundary_idxs] = False
-            # Exclude points that in the camera frame have a euclidean distance greater than a treshold
+            # Exclude points that in the camera frame have a euclidean distance
+            # greater than a treshold
             outside_point_idxs = self.get_points_outside_radius(
                 pc_cam_frame, radius=25)
             self.pcs_edge_masks[-1][outside_point_idxs] = False
@@ -117,6 +121,7 @@ class PcEdgeDetector:
 
     @staticmethod
     def load_pcs(path, frames, subsample=1.0):
+        """Load pointclouds, separate XYZ and Reflectance components"""
         pcs = []
         reflectances = []
 
@@ -135,9 +140,9 @@ class PcEdgeDetector:
             elif ext == '.txt':
                 curr_pc = (np.loadtxt(path,
                                        dtype=np.float32).reshape(-1, 4))[:, :]
-
             else:
-                continue
+                print("Invalid point-cloud format encountered.")
+                exit()
 
             pc = curr_pc[:int(subsample * curr_pc.shape[0]), :3]
             refl = curr_pc[:int(subsample * curr_pc.shape[0]), 3]
@@ -148,9 +153,10 @@ class PcEdgeDetector:
 
     @staticmethod
     def compute_centerscore(nn_xyz, center_xyz, max_nn_d):
-        # Description: Compute modified center-based score. Distance between center (center_xyz),
-        #              and the neighborhood (N x 3) around center_xyz. Result is scaled by max
-        #              distance in the neighborhood, as done in Kang 2019.
+        """Description: Compute modified center-based score. Distance between
+        center (center_xyz), and the neighborhood (N x 3) around center_xyz.
+        Result is scaled by max distance in the neighborhood, as done in
+        Kang 2019."""
 
         centroid = np.mean(nn_xyz, axis=0)
         norm_dist = np.linalg.norm(center_xyz - centroid) / max_nn_d
@@ -180,14 +186,14 @@ class PcEdgeDetector:
 
     @staticmethod
     def compute_depth_discontinuity_score(point_cloud, num_channels):
-        # Description: Compute vertical edges using depth discontinuity as the edge indicator. First
-        #              the points of the point cloud are sorted according to their polar angle to
-        #              group the points into their corresponding channels. Then the points of the
-        #              channels are sorted according to their azimuth angle. After calculating the depth
-        #              of each point, the change of depth between consecutive points in the sorted
-        #              channel is calculated. If this change is above a threshold for a certain point,
-        #              it is considered an edge.
-        # Return:      A binary mask indicating edges in the point cloud.
+        """Description: Compute vertical edges using depth discontinuity as the edge indicator. First
+                     the points of the point cloud are sorted according to their polar angle to
+                     group the points into their corresponding channels. Then the points of the
+                     channels are sorted according to their azimuth angle. After calculating the depth
+                     of each point, the change of depth between consecutive points in the sorted
+                     channel is calculated. If this change is above a threshold for a certain point,
+                     it is considered an edge.
+        Return:      A binary mask indicating edges in the point cloud."""
 
         # Calculate the polar angle for every point
         polar_angle = 180 * np.arctan2(point_cloud[:, 2], np.sqrt(
@@ -233,7 +239,7 @@ class PcEdgeDetector:
             # Visualize current ring colored by azimuth value
             VISUALIZE_CURRENT_RING = False
             if VISUALIZE_CURRENT_RING:
-                visualize_xyz_scores(
+                PcEdgeDetector.visualize_xyz_scores(
                     current_channel_points_sorted, azimuth_angle_sorted, cmap=cm.summer)
 
             # Calculate the depth of each point
@@ -259,22 +265,6 @@ class PcEdgeDetector:
             edges_filter = np.logical_or(
                 delta_depth_rml < -0.5, delta_depth_lmr < -0.5)
 
-            # # Wang method
-            # a = 5
-            # smooth_depth_i = np.zeros(depth.shape)
-            # smooth_depth_j = np.zeros(depth.shape)
-            # for k in range(-a, a+1):
-            #     smooth_depth_i += np.roll(depth, k)/(2*a+1)
-            #     smooth_depth_j += np.roll(depth, k-1)/(2*a+1)
-            # ddepth = np.abs(smooth_depth_i - smooth_depth_j)
-            # ddepth_thresh = np.percentile(ddepth, 75)
-            #
-            # # nms
-            # for k in range(1, ddepth.shape[0]-1):
-            #     if ddepth[k] < ddepth[k-1] or ddepth[k] < ddepth[k+1]:
-            #         ddepth[k] = 0
-            # point_cloud_ddepth[current_channel_idxs] = np.expand_dims(ddepth, 1)
-            # edges_filter = ddepth > ddepth_thresh
 
             current_edges = current_channel_points_sorted[edges_filter]
 
@@ -287,20 +277,17 @@ class PcEdgeDetector:
             # Visualize edges in current ring
             VISUALIZE_EDGES_IN_RING = False
             if VISUALIZE_EDGES_IN_RING:
-                visualize_xyz_scores(
+                PcEdgeDetector.visualize_xyz_scores(
                     current_channel_points_sorted, edges_filter, cmap=cm.summer)
 
             # Delete current edges if too many are detected
             if current_edges.shape[0] > 500:
                 continue
-
             edge_idxs.extend(current_ring_edge_idxs.tolist())
 
         # Get the binary mask indicating the edge points in the point cloud
         point_cloud_mask = np.zeros(point_cloud.shape[0])
         point_cloud_mask[edge_idxs] = True
-
-        # return point_cloud_ddepth
         return point_cloud_mask
 
     @staticmethod
