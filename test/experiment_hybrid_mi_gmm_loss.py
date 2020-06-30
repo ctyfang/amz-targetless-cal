@@ -8,22 +8,23 @@ import pickle
 import json
 from prettytable import PrettyTable
 
-
 """Script parameters"""
-calibrator_path = '../generated/calibrators/0928-6frames-corresps.pkl'
+save_every = 1
 select_new_correspondences = False
-LOG_DIR = '../generated/optimizer_logs/0928-6frames-chamfer+mi'
-save_every = 2
+calibrator_path = '../generated/calibrators/0928-6frames.pkl'
+LOG_DIR = '../generated/optimizer_logs/test'
 
 """Experiment parameters"""
-# exp_params = {'NUM_SAMPLES': 3, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
-#               'ALPHA_MI': [300.0, 300.0], 'ALPHA_GMM': [10.0, 10.0],
-#               'ALPHA_CORR': [1e-1, 1.25e-1], 'SIGMAS': [2.5, 1.0],
-#               'MAX_ITERS': 200}
-exp_params = {'NUM_SAMPLES': 3, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
-              'ALPHA_MI': [20], 'ALPHA_GMM': [0],
-              'ALPHA_CORR': [1e-3], 'SIGMAS': [1.0],
-              'MAX_ITERS': 100}
+exp_params = {'NUM_SAMPLES': 10, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
+              'ALPHA_MI': [1], 'ALPHA_GMM': [5],
+              'ALPHA_POINTS': [0], 'ALPHA_CORR': [0],
+              'SIGMAS': [7.0],
+              'MAX_ITERS': 100, 'SCALES': np.power(10*np.ones((1, 6)),
+                                                   [0, 0, 0, -2, -2, -2]).tolist()}
+
+"""Default Hyperparameter Template"""
+hyperparams = {'alphas': {'mi': 1, 'gmm': 5, 'points': 0, 'corr': 0},
+               'scales': exp_params['SCALES']}
 
 """Calibration directory specification"""
 calib_dir_list = ['/media/carter/Samsung_T5/3dv/2011_09_28/calibration',
@@ -42,7 +43,6 @@ if os.path.exists(calibrator_path):
 else:
     print('Calibrator does not exist at specified path!')
     exit()
-
 
 """Load ground-truth extrinsics"""
 R, T = load_lid_cal(calib_dir)
@@ -77,7 +77,6 @@ for sample_idx in range(exp_params['NUM_SAMPLES']):
     calibrator.update_extrinsics(perturb_tau(tau_gt,
                                  trans_std=exp_params['TRANS_ERR_SIGMA'],
                                  angle_std=exp_params['ANGLE_ERR_SIGMA']))
-    # calibrator.select_correspondences()
     compare_taus(tau_gt, calibrator.tau)
 
     calibrator.project_point_cloud()
@@ -99,34 +98,29 @@ for sample_idx in range(exp_params['NUM_SAMPLES']):
 
     """Run optimizer"""
     for stage_idx in range(len(exp_params["SIGMAS"])):
-        sigma_in, alpha_gmm, alpha_mi, alpha_corr = \
+        sigma_in, alpha_gmm, alpha_mi, alpha_points, alpha_corr = \
             exp_params['SIGMAS'][stage_idx], \
             exp_params['ALPHA_GMM'][stage_idx], \
             exp_params['ALPHA_MI'][stage_idx], \
+            exp_params['ALPHA_POINTS'][stage_idx], \
             exp_params['ALPHA_CORR'][stage_idx]
 
+        curr_hyperparams = hyperparams.copy()
+        curr_hyperparams['alphas']['mi'] = alpha_mi
+        curr_hyperparams['alphas']['gmm'] = alpha_gmm
+        curr_hyperparams['alphas']['points'] = alpha_points
+        curr_hyperparams['alphas']['corr'] = alpha_corr
+        curr_hyperparams['alphas']['sigma'] = sigma_in
 
-        tau_opt, cost_history = calibrator.ls_optimize(sigma_in,
-                                                       alpha_gmm=alpha_gmm,
-                                                       alpha_mi=alpha_mi,
-                                                       alpha_corr=alpha_corr,
+        tau_opt, cost_history = calibrator.ls_optimize(hyperparams,
                                                        maxiter=exp_params['MAX_ITERS'],
                                                        save_every=save_every)
-
-        # else:
-        #     tau_opt, cost_history = calibrator.ls_optimize_translation(sigma_in,
-        #                                                    alpha_gmm=alpha_gmm,
-        #                                                    alpha_mi=alpha_mi,
-        #                                                    alpha_corr=alpha_corr,
-        #                                                    maxiter=exp_params['MAX_ITERS'],
-        #                                                    save_every=10)
-
         calibrator.tau = tau_opt
         compare_taus(tau_gt, tau_opt)
         calibrator.project_point_cloud()
 
     """Save results from this optimization stage"""
-    tau_data.append(tau_opt)
+    tau_data.append(np.squeeze(tau_opt))
 
     """Save projections with final optimized tau"""
     os.makedirs(os.path.join(LOG_DIR, f'trial_{sample_idx}', f'stage_{stage_idx}'), exist_ok=True)
@@ -153,9 +147,6 @@ np.save(os.path.join(LOG_DIR, 'tau_inits'), tau_inits)
 
 tau_data = np.asarray(tau_data)
 np.save(os.path.join(LOG_DIR, 'tau_data'), tau_data)
-
-np.save(os.path.join(LOG_DIR, 'tau_scales'), calibrator.tau_ord_mags)
-
 
 plt.figure()
 plt.clf()
