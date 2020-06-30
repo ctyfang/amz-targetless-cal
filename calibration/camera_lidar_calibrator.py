@@ -696,10 +696,10 @@ class CameraLidarCalibrator:
                                  for i in range(self.num_frames)]
 
         # Generate initial simplex for Nelder-Mead
-        simplex_deltas = [0.10, 0.10, 0.10, 1.0, 1.0, 1.0]
+        initial_deltas = [0.10, 0.10, 0.10, 1.0, 1.0, 1.0]
         opt_options = {'disp': True, 'maxiter': maxiter, 'adaptive': True,
                        'initial_simplex': get_mixed_delta_simplex(self.tau,
-                                                                  simplex_deltas,
+                                                                  initial_deltas,
                                                                   scales=hyperparams['scales'])}
         self.num_iterations = 0
         self.opt_save_every = save_every
@@ -718,13 +718,17 @@ class CameraLidarCalibrator:
                 cv.imwrite('current_projection.jpg', img)
             return False
 
+        update_deltas = [0.10, 0.10, 0.10, 0.5, 0.5, 0.5]
         def bh_callback(x, f, accepted):
             print(f"Minimum found at x: {x}, f: {f}. Accepted: {accepted}")
-            print(f"Modifying initial simplex")
 
-            opt_options['initial_simplex'] = get_mixed_delta_simplex(np.multiply(x, hyperparams['scales']),
-                                                                     simplex_deltas,
-                                                                     scales=hyperparams['scales'])
+            if accepted:
+                print(f"Modifying simplex")
+                opt_options['initial_simplex'] = \
+                    get_mixed_delta_simplex(np.multiply(x,
+                                            hyperparams['scales']),
+                                            update_deltas,
+                                            scales=hyperparams['scales'])
             return False
 
         # Compute cost
@@ -738,6 +742,7 @@ class CameraLidarCalibrator:
         #                        args=(self, hyperparams, cost_history, False),
         #                        options=opt_options,
         #                        callback=loss_callback)
+        # self.tau = np.multiply(opt_results.x, hyperparams['scales'])
 
         # Basin-Hopping
         step_vector = [0.10, 0.10, 0.10, 1.0, 1.0, 1.0]
@@ -751,7 +756,9 @@ class CameraLidarCalibrator:
                                                              False),
                                                      'callback': loss_callback,
                                                      'options': opt_options})
-        self.tau = np.multiply(opt_results.x, hyperparams['scales'])
+        self.tau = np.multiply(opt_results.lowest_optimization_result.x,
+                               hyperparams['scales'])
+
         print(f"NL optimizer time={time.time() - start}")
         return self.tau, cost_history
 
