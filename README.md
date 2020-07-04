@@ -1,6 +1,6 @@
 # Target-less Camera-LiDAR Calibration
 
-## Overview
+## Description
 Target-less Calibration between Camera and LiDAR using
 
 1. Manually selected correspondence
