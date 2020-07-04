@@ -1,17 +1,18 @@
+from datetime import datetime
+import itertools as iter
+import gc
+
+import matplotlib.pyplot as plt
+from pyquaternion import Quaternion
+from KDEpy import FFTKDE
 import numpy as np
 import cv2 as cv
-from pyquaternion import Quaternion
-import gc
-import itertools as iter
-import scipy
-from datetime import datetime
-import matplotlib.pyplot as plt
 
+import scipy
 from scipy._lib._util import check_random_state
 from scipy.optimize import least_squares, minimize, basinhopping
 from scipy.stats import multivariate_normal, entropy
 from scipy.spatial.ckdtree import cKDTree
-from KDEpy import FFTKDE
 
 from calibration.img_edge_detector import ImgEdgeDetector
 from calibration.pc_edge_detector import PcEdgeDetector
@@ -120,11 +121,10 @@ class CameraLidarCalibrator:
 
             img_gray = cv.cvtColor(self.img_detector.imgs[frame_idx],
                                    cv.COLOR_BGR2GRAY)
-            img_synthetic = gen_synthetic_image(curr_pc,
-                             self.pc_detector.reflectances[frame_idx],
-                             self.R, self.T, self.K,
-                             (self.img_detector.img_h,
-                             self.img_detector.img_w))
+            img_synthetic = gen_synthetic_image(
+                curr_pc, self.pc_detector.reflectances[frame_idx], self.R,
+                self.T, self.K,
+                (self.img_detector.img_h, self.img_detector.img_w))
 
             cv.namedWindow("Correspondences")
             cv.setMouseCallback("Correspondences", correspondence_cb)
@@ -140,8 +140,12 @@ class CameraLidarCalibrator:
                     curr_img = img_synthetic
                     curr_img_name = "synthetic"
 
-                curr_img = np.repeat(np.expand_dims(curr_img, axis=2), 3, axis=2)
-                curr_img = cv.circle(curr_img, tuple(ref_pt), radius=2,
+                curr_img = np.repeat(np.expand_dims(curr_img, axis=2),
+                                     3,
+                                     axis=2)
+                curr_img = cv.circle(curr_img,
+                                     tuple(ref_pt),
+                                     radius=2,
                                      color=(255, 0, 0),
                                      thickness=-1)
                 cv.imshow("Correspondences", curr_img)
@@ -166,13 +170,14 @@ class CameraLidarCalibrator:
             lidar_points = np.asarray(lidar_points)
 
             if self.visualize:
-                cv.imshow("Matches", draw_point_matches(img_gray, gray_pixels,
-                                     img_synthetic, lidar_pixels))
+                cv.imshow(
+                    "Matches",
+                    draw_point_matches(img_gray, gray_pixels, img_synthetic,
+                                       lidar_pixels))
                 cv.waitKey(0)
                 cv.destroyAllWindows()
 
-            self.correspondences.append((gray_pixels,
-                                         lidar_points))
+            self.correspondences.append((gray_pixels, lidar_points))
 
     def update_extrinsics(self, tau_new):
         """Given new extrinsic parameters, update the rotation matrix,
@@ -326,9 +331,9 @@ class CameraLidarCalibrator:
 
         if show:
             cv.imshow('Projected Point Cloud Reflectance Image', refl_img)
-            cv.imshow('Grayscale img',
-                      cv.cvtColor(self.img_detector.imgs[frame],
-                                  cv.COLOR_BGR2GRAY))
+            cv.imshow(
+                'Grayscale img',
+                cv.cvtColor(self.img_detector.imgs[frame], cv.COLOR_BGR2GRAY))
             cv.waitKey(0)
             cv.destroyAllWindows()
 
@@ -359,8 +364,13 @@ class CameraLidarCalibrator:
             cv.destroyAllWindows()
         return image
 
-    def draw_edge_points(self, score=None, image=None, append_string='',
-                         frame=-1, save=False, show=False):
+    def draw_edge_points(self,
+                         score=None,
+                         image=None,
+                         append_string='',
+                         frame=-1,
+                         save=False,
+                         show=False):
         """
         Draw only edge points within corresponding camera's FoV on image provided.
         """
@@ -490,16 +500,15 @@ class CameraLidarCalibrator:
 
             joint_data = np.hstack([grayscale_vector, reflectance_vector])
             intensity_vector = np.linspace(0, 255, 510)
-            grid_x, grid_y = np.meshgrid(intensity_vector,
-                                         intensity_vector)
+            grid_x, grid_y = np.meshgrid(intensity_vector, intensity_vector)
             grid_data = np.vstack([grid_y.ravel(), grid_x.ravel()])
             grid_data = grid_data.T
 
             gray_probs = FFTKDE(
                 bw='silverman').fit(grayscale_vector).evaluate(intensity_vector)
 
-            refl_probs = FFTKDE(
-                bw='silverman').fit(reflectance_vector).evaluate(intensity_vector)
+            refl_probs = FFTKDE(bw='silverman').fit(
+                reflectance_vector).evaluate(intensity_vector)
             joint_probs = FFTKDE().fit(joint_data).evaluate(grid_data)
 
             gray_probs /= np.sum(gray_probs)
@@ -515,8 +524,18 @@ class CameraLidarCalibrator:
         return -mi_cost
 
     def compute_conv_cost(self, sigma_in, frame=-1, sigma_scaling=True):
-        #TODO-Documentation
-        """Compute cost"""
+        """For selected image-scan pair, compute GMM cost
+
+        For each points within camera's FoV and above edge score
+        threshold, retrieve image patch within 3-sigma, and compute
+        point-wise cost based on Gaussian approximity.
+
+        :param: sigma_in: base standard deviation for gaussian kernel
+        :param: frame: Integer index indicating the image-scan pair
+        :param: sigma_scaling: Boolean indicating whether to scale using the   
+                               distance of each point
+        :return: Negative of the GMM cost
+        """
         # start_t = time.time()
         cost_map = np.zeros(self.img_detector.img_edge_scores[frame].shape)
         for idx_pc in range(self.pc_detector.pcs_edge_idxs[frame].shape[0]):
@@ -527,7 +546,6 @@ class CameraLidarCalibrator:
             if not self.projection_mask[frame][idx]:
                 continue
 
-            # TODO: Use camera frame pointcloud for sigma scaling
             if sigma_scaling:
                 sigma = (
                     sigma_in /
@@ -592,7 +610,7 @@ class CameraLidarCalibrator:
         pixel_distances = []
         num_corresp = 0
         dist_offset = np.sqrt(self.img_detector.img_w**2 +
-                              self.img_detector.img_h**2)*3
+                              self.img_detector.img_h**2) * 3
 
         for matches in self.correspondences:
             gray_pixels = matches[0]
@@ -604,7 +622,8 @@ class CameraLidarCalibrator:
             lidar_pixels = lidar_pixels_homo[:, :2]
 
             pixel_diff = gray_pixels - lidar_pixels
-            pixel_distances += np.linalg.norm(pixel_diff, axis=1, ord=1).tolist()
+            pixel_distances += np.linalg.norm(pixel_diff, axis=1,
+                                              ord=1).tolist()
             num_corresp += lidar_pixels.shape[0]
 
         total_dist = 0
@@ -613,8 +632,8 @@ class CameraLidarCalibrator:
                 total_dist += dist
             else:
                 total_dist += (dist**2)
-        average_dist = total_dist/num_corresp
-        return -dist_offset + 3*average_dist
+        average_dist = total_dist / num_corresp
+        return -dist_offset + 3 * average_dist
 
     def compute_points_cost(self, frame=-1):
         """Compute the change in the number of points compared to at the start
@@ -642,15 +661,24 @@ class CameraLidarCalibrator:
         cost_history = []
 
         # Store initial number of points for points-based cost
-        self.numpoints_preopt = [np.sum(self.projection_mask[i])
-                                 for i in range(self.num_frames)]
+        self.numpoints_preopt = [
+            np.sum(self.projection_mask[i]) for i in range(self.num_frames)
+        ]
 
         # Generate initial simplex for Nelder-Mead
         initial_deltas = [0.10, 0.10, 0.10, 0.5, 0.5, 0.5]
-        opt_options = {'disp': True, 'maxiter': maxiter, 'adaptive': True,
-                       'initial_simplex': get_mixed_delta_simplex(self.tau,
-                                          initial_deltas,
-                                          scales=hyperparams['scales'])}
+        opt_options = {
+            'disp':
+                True,
+            'maxiter':
+                maxiter,
+            'adaptive':
+                True,
+            'initial_simplex':
+                get_mixed_delta_simplex(self.tau,
+                                        initial_deltas,
+                                        scales=hyperparams['scales'])
+        }
         self.num_iterations = 0
 
         def loss_callback(xk, state=None):
@@ -695,15 +723,21 @@ class CameraLidarCalibrator:
         else:
             # Basin-Hopping
             step_vector = [0.10, 0.10, 0.10, 1.0, 1.0, 1.0]
-            opt_results = basinhopping(loss, tau_scaled, 10, T=1.5,
-                                       niter_success=3,
-                                       disp=True, callback=bh_callback,
-                                       take_step=RandomDisplacement(step_vector),
-                                       minimizer_kwargs={'method': 'Nelder-Mead',
-                                                         'args': (self, hyperparams,
-                                                                 cost_history),
-                                                         'callback': loss_callback,
-                                                         'options': opt_options})
+            opt_results = basinhopping(
+                loss,
+                tau_scaled,
+                10,
+                T=1.5,
+                niter_success=3,
+                disp=True,
+                callback=bh_callback,
+                take_step=RandomDisplacement(step_vector),
+                minimizer_kwargs={
+                    'method': 'Nelder-Mead',
+                    'args': (self, hyperparams, cost_history),
+                    'callback': loss_callback,
+                    'options': opt_options
+                })
             self.tau = np.multiply(opt_results.lowest_optimization_result.x,
                                    hyperparams['scales'])
 
@@ -733,9 +767,6 @@ def loss(tau_scaled, calibrator, hyperparams, cost_history):
              in hyperparams dictionary.
     """
 
-    """Compute loss for given tau with hyperparams dict. If return components
-    is true, returns list of components instead of their sum. """
-
     # Rescale Extrinsics
     tau = np.multiply(tau_scaled, hyperparams['scales'])
     calibrator.update_extrinsics(tau)
@@ -748,9 +779,8 @@ def loss(tau_scaled, calibrator, hyperparams, cost_history):
             cost_components[0] += calibrator.compute_mi_cost(frame_idx)
 
         if hyperparams['alphas']['gmm']:
-            cost_components[1] += calibrator.compute_conv_cost(hyperparams['alphas']['sigma'],
-                                                               frame_idx,
-                                                               sigma_scaling=False)
+            cost_components[1] += calibrator.compute_conv_cost(
+                hyperparams['alphas']['sigma'], frame_idx, sigma_scaling=False)
 
         if hyperparams['alphas']['points']:
             cost_components[2] += calibrator.compute_points_cost(frame_idx)
@@ -780,12 +810,14 @@ class RandomDisplacement(object):
     random_gen : {None, `np.random.RandomState`, `np.random.Generator`}
         The random number generator that generates the displacements
     """
+
     def __init__(self, stepsize, random_gen=None):
         self.stepsize = stepsize
         self.random_gen = check_random_state(random_gen)
 
     def __call__(self, x):
         for i in range(len(x)):
-            x[i] *= (1+self.random_gen.uniform(-self.stepsize[i],
-                                               self.stepsize[i]))
+            x[i] *= (
+                1 +
+                self.random_gen.uniform(-self.stepsize[i], self.stepsize[i]))
         return x
