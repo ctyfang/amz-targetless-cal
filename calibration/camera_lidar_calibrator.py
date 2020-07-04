@@ -1,5 +1,3 @@
-"""Top-level class for Calibration"""
-
 import numpy as np
 import cv2 as cv
 from pyquaternion import Quaternion
@@ -9,6 +7,7 @@ import scipy
 from datetime import datetime
 import matplotlib.pyplot as plt
 
+from scipy._lib._util import check_random_state
 from scipy.optimize import least_squares, minimize, basinhopping
 from scipy.stats import multivariate_normal, entropy
 from scipy.spatial.ckdtree import cKDTree
@@ -22,8 +21,17 @@ from calibration.utils.pc_utils import *
 
 
 class CameraLidarCalibrator:
+    """Top-level class for lidar-camera calibration"""
 
     def __init__(self, cfg, visualize=False, tau_init=None):
+        """Extract paths and thresholds from config dict. Load images and pcs,
+        run edge detection on images and pcs. Select correspondences.
+
+        :param cfg: Dictionary with calibration parameters. See utils/config.py.
+        :param visualize: Boolean specifying whether or not to visualize outputs
+                          of img/pc edge detection.
+        :param tau_init: Initial guess for the extrinsic parameters.
+        """
         self.visualize = visualize
         self.projected_points = []
         self.points_cam_frame = []
@@ -74,6 +82,15 @@ class CameraLidarCalibrator:
         self.num_iterations = 0
 
     def select_correspondences(self):
+        """Generate synthetic lidar image for each image-scan pair. Allow user
+        to manually select correspondences.
+
+        Grayscale image and Synthetic image are shown in alternating order.
+        After selecting a correspondence, the selected pixel is highlighted
+        blue in the image. When ready to move on, press "y" key to alternate
+        to grayscale/synthetic. When finished selecting correspondences,
+        press "q" key to quit and save.
+        """
         self.correspondences = []
 
         curr_img_name = "gray"
@@ -158,29 +175,57 @@ class CameraLidarCalibrator:
                                          lidar_points))
 
     def update_extrinsics(self, tau_new):
-        """Given new extrinsics, update rotation matrices and translation vec"""
+        """Given new extrinsic parameters, update the rotation matrix,
+        translation vector, and tau.
+
+        :param tau_new: New extrinsics vector.
+        """
         R, T = self.tau_to_transform(tau_new)
         self.R, self.T = R, T
         self.tau = tau_new
 
     @staticmethod
     def transform_to_tau(R, T):
+        """Given rotation and translation matrices/vectors, compute the
+        extrinsics vector.
+
+        The extrinsics vector, tau, has 6 parameters. The first three parameters
+        are a rotation vector. The last three parameters are a translation
+        vector.
+
+        :param R: (3, 3) Rotation matrix.
+        :param T: (3, 1) Translation vector.
+        :return: (6, 1) numpy array.
+        """
         r_vec, _ = cv2.Rodrigues(R)
         return np.hstack((r_vec.T, T.T)).reshape(6,)
 
     @staticmethod
     def tau_to_transform(tau):
+        """Given the extrinsics vector, compute the rotation and translation
+        matrices/vectors.
+
+        The extrinsics vector, tau, has 6 parameters. The first three parameters
+        are a rotation vector. The last three parameters are a translation
+        vector.
+
+        :param tau: (6, 1) numpy array.
+        :return: [R, T], where R is (3, 3) numpy array, T is (3, 1) numpy array.
+        """
         tau = np.squeeze(tau)
         R, _ = cv2.Rodrigues(tau[:3])
         T = tau[3:].reshape((3, 1))
         return R, T
 
     def project_point_cloud(self):
-        '''
+        """For each image-scan pair, project the pointcloud onto the image using
+        current extrinsics. Compute a binary mask indicating the points that
+        land within image boundaries.
+
         Transform all points of the point cloud into the camera frame and then
-        projects all points to the image plane. Also return a binary mask to 
-        obtain all points with a valid projection.
-        '''
+        projects all points to the image plane. Also store a binary mask to
+        obtain all points with a valid projection within image boundaries.
+        """
         # Compute R and T from current tau
         self.R, self.T = self.tau_to_transform(self.tau)
 
@@ -204,7 +249,6 @@ class CameraLidarCalibrator:
             self.projected_points.append(projected_points.T)
 
             # Remove points that were behind the camera
-            # self.points_cam_frame = self.points_cam_frame.T
             in_front_of_camera_mask = self.points_cam_frame[-1][:, 2] > 0
 
             # Remove projected points that are outside of the image
@@ -221,9 +265,19 @@ class CameraLidarCalibrator:
                 np.logical_and(inside_mask, in_front_of_camera_mask))
 
     def draw_all_points(self, score=None, img=None, frame=-1, show=False):
+        """Draw projected points on the image provided.
+
+        For the selected frame, project the points (N, 3) onto the image.
+        Colorize the points using the provided score vector (N, 1).
+
+        :param score: (N, 1) numpy array with scores used to colorize projected
+                      points.
+        :param img: (H, W) image used to draw the points over.
+        :param frame: Integer index used to select the image-scan pair.
+        :param show: Boolean to visualize the projected points or not.
+        :return: (H, W, 3) image with the projected points.
         """
-        Draw all points within corresponding camera's FoV on image provided.
-        """
+
         if img is None:
             image = self.img_detector.imgs[frame].copy()
         else:
@@ -239,7 +293,6 @@ class CameraLidarCalibrator:
             cv2.circle(image,
                        (pixel[0].astype(np.int), pixel[1].astype(np.int)), 1,
                        color.tolist(), -1)
-            # image[pixel[1].astype(np.int), pixel[0].astype(np.int), :] = color
 
         if show:
             cv.imshow('Projected Point Cloud on Image', image)
@@ -248,8 +301,16 @@ class CameraLidarCalibrator:
 
         return image
 
-    def draw_reflectance(self, frame=-1):
-        """Given frame, draw reflectance image"""
+    def draw_reflectance(self, frame=-1, show=False):
+        """For selected image-scan pair, draw the reflectance image.
+
+        Project the pointcloud onto the image using current extrinsics. Colorize
+        projected points using the reflectance of points.
+
+        :param frame: Integer index indicating which image-scan pair to use.
+        :param show: Boolean to visualize or not.
+        :return: (H, W) grayscale image with projected points.
+        """
         img_h, img_w = self.img_detector.imgs[frame].shape[:2]
         refl_img = np.zeros((img_h, img_w), dtype=np.float32)
 
@@ -263,45 +324,25 @@ class CameraLidarCalibrator:
             refl_img[pixel[1].astype(np.int),
                      pixel[0].astype(np.int)] = reflectance
 
-        cv.imshow('Projected Point Cloud Reflectance Image', refl_img)
-        cv.imshow('Grayscale img',
-                  cv.cvtColor(self.img_detector.imgs[frame], cv.COLOR_BGR2GRAY))
-        cv.waitKey(0)
-        cv.destroyAllWindows()
-
-    def draw_depth_image(self, frame=-1, show=False):
-        img_h, img_w = self.img_detector.imgs[frame].shape[:2]
-        image = np.zeros((img_h, img_w), dtype=np.float32)
-
-        grid_x, grid_y = np.mgrid[0:img_w, 0:img_h]
-
-        depth = np.linalg.norm(self.pc_detector.pcs[frame], ord=2, axis=1)
-        depth_valid = depth[self.projection_mask[frame]]
-
-        # depth_valid = self.pc_detector.reflectances[frame][
-        #     self.projection_mask[frame]] * 255
-        projected_points_valid = self.projected_points[frame][
-            self.projection_mask[frame]]
-
-        depth_img = griddata(projected_points_valid,
-                             depth_valid, (grid_x, grid_y),
-                             method='linear').T
-
-        depth_img = (depth_img * 255 / np.nanmax(depth_img)).astype(np.uint8)
         if show:
-            cv.imshow('Depth image with linear interpolation', depth_img)
+            cv.imshow('Projected Point Cloud Reflectance Image', refl_img)
+            cv.imshow('Grayscale img',
+                      cv.cvtColor(self.img_detector.imgs[frame],
+                                  cv.COLOR_BGR2GRAY))
             cv.waitKey(0)
             cv.destroyAllWindows()
 
-        return depth_img
+    def draw_edge_points_binary(self, frame=-1, show=False):
+        """For selected image-scan pair, draw the detected edge points.
 
-    def draw_edge_points_binary(self,
-                                 frame=-1,
-                                 show=False):
-        """
-        Draw only edge points within corresponding camera's FoV.
-        """
+        Project the detected edge points in the pointcloud onto a blank image
+        using current extrinsics. Edge points that land outside of image bounds
+        are ignored.
 
+        :param frame: Integer index indicating which image-scan pair to use.
+        :param show: Boolean to visualize or not.
+        :return: (H, W) binary image with projected points.
+        """
         image = np.zeros((self.img_detector.img_h, self.img_detector.img_w),
                          dtype=np.bool)
 
@@ -316,16 +357,10 @@ class CameraLidarCalibrator:
             cv.imshow('Projected Edge Points on Image', image)
             cv.waitKey(0)
             cv.destroyAllWindows()
-
         return image
 
-    def draw_edge_points(self,
-                         score=None,
-                         image=None,
-                         append_string='',
-                         frame=-1,
-                         save=False,
-                         show=False):
+    def draw_edge_points(self, score=None, image=None, append_string='',
+                         frame=-1, save=False, show=False):
         """
         Draw only edge points within corresponding camera's FoV on image provided.
         """
@@ -424,117 +459,20 @@ class CameraLidarCalibrator:
                    np.power(self.pc_detector.pcs[:, 1], 2),
                    np.power(self.pc_detector.pcs[:, 2], 2)))
         np.clip(dist, 0, max_d, out=dist)
-        # max distance is 120m but usually not usual
+        # max distance is 120m but usually not the case
         return (((dist - min_d) / (max_d - min_d)) * 120).astype(np.uint8)
 
-    @staticmethod
-    def gaussian_pdf(u, v, sigma, mu=0):
-        """Compute P(d) according to the 1d gaussian pdf"""
-        d = np.sqrt(u**2 + v**2)
-        return (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp(-(d**2) /
-                                                           (2 * (sigma**2)))
-
-    @staticmethod
-    def gaussian_pdf_deriv(u, v, sigma, mu=0, wrt='u'):
-        d = np.sqrt(u**2 + v**2)
-        if wrt == 'u':
-            factor = u
-        else:
-            factor = v
-        return (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp(
-            -(d**2) / (2 * (sigma**2))) * (-factor / sigma)
-
-    def compute_gradient(self, sigma_in):
-        """Assuming lidar edge points have already been projected, compute gradient at current tau
-           Also assumes tau has already been converted to rot mat and trans vec."""
-
-        # GMM Cost
-        gradient = np.zeros(6)
-        omega = self.tau[:3]
-        jac = jacobian(omega)
-
-        # TODO: Simplify
-        f_x = self.K[0, 0]
-        f_y = self.K[1, 1]
-
-        # iterate over lidar edge points
-        for idx in range(self.pc_detector.pcs_edge_idxs.shape[0]):
-            pt_idx = self.pc_detector.pcs_edge_idxs[idx]
-
-            # check if projected point lands within image bounds
-            if self.projection_mask[pt_idx]:
-                # lidar edge weight
-                w_i = self.pc_detector.pcs_edge_scores[pt_idx]
-
-                # gaussian parameters
-                mu = self.projected_points[pt_idx, :]
-                # sigma = sigma_in / np.linalg.norm(self.pc_detector.pcs[pt_idx, :])
-                sigma = sigma_in
-
-                # neighborhood params
-                min_x = max(0, int(mu[0] - 3 * sigma))
-                max_x = min(self.img_detector.img_w, int(mu[0] + 3 * sigma))
-                min_y = max(0, int(mu[1] - 3 * sigma))
-                max_y = min(self.img_detector.img_h, int(mu[1] + 3 * sigma))
-                num_ed_projected_points = np.sum(
-                    self.img_detector.imgs_edges[min_y:max_y, min_x:max_x])
-
-                # iterate over 3-sigma neighborhood
-                for x in range(min_x, max_x):
-                    for y in range(min_y, max_y):
-
-                        # check if current img pixel is an edge pixel
-                        if self.img_detector.imgs_edges[y, x]:
-                            w_j = self.img_detector.img_edge_scores[y, x]
-                            w_ij = 0.5 * (w_i + w_j) / num_ed_projected_points
-
-                            M = -np.dot(
-                                skew(
-                                    np.dot(self.R,
-                                           self.pc_detector.pcs[pt_idx])), jac)
-
-                            dxc_dtau = dyc_dtau = dzc_dtau = np.zeros((1, 6))
-                            dxc_dtau[0, :3] = M[0, :]
-                            dxc_dtau[0, 3] = 1
-
-                            dyc_dtau[0, :3] = M[1, :]
-                            dyc_dtau[0, 4] = 1
-
-                            dyc_dtau[0, :3] = M[2, :]
-                            dyc_dtau[0, 5] = 1
-
-                            u, v = abs(x - mu[0]), abs(y - mu[1])
-                            dG_du = self.gaussian_pdf_deriv(u,
-                                                            v,
-                                                            sigma,
-                                                            wrt='u')
-                            dG_dv = self.gaussian_pdf_deriv(u,
-                                                            v,
-                                                            sigma,
-                                                            wrt='v')
-
-                            x_c, y_c, z_c = self.points_cam_frame[pt_idx, :]
-                            du_dxc = f_x / z_c
-                            du_dyc = 0
-                            du_dzc = -(f_x * x_c) / (z_c**2)
-                            dv_dxc = 0
-                            dv_dyc = f_y / z_c
-                            dv_dzc = -(f_y * y_c) / (z_c**2)
-
-                            du_dtau = ((du_dxc * dxc_dtau) +
-                                       (du_dyc * dyc_dtau) +
-                                       (du_dzc * dzc_dtau))
-                            dv_dtau = ((dv_dxc * dxc_dtau) +
-                                       (dv_dyc * dyc_dtau) +
-                                       (dv_dzc * dzc_dtau))
-
-                            gradient = gradient + \
-                                       w_ij * ((dG_du * du_dtau) + (
-                                        dG_dv * dv_dtau))
-        return -gradient
-
     def compute_mi_cost(self, frame=-1):
-        """Compute mutual info cost for one frame"""
+        """For selected image-scan pair, compute mutual information cost.
+
+        Using locations of projected lidar points that land within image bounds,
+        generate vector of the grayscale intensities, and vector of reflection
+        intensities. Model distribution of each using a Kernel Density Estimate
+        (KDE). Compute the mutual information between the two random variables.
+
+        :param frame: Integer index indicating the image-scan pair.
+        :return: Negative of the Mutual information cost.
+        """
         self.project_point_cloud()
         grayscale_img = cv.cvtColor(self.img_detector.imgs[frame],
                                     cv.COLOR_BGR2GRAY)
@@ -577,6 +515,7 @@ class CameraLidarCalibrator:
         return -mi_cost
 
     def compute_conv_cost(self, sigma_in, frame=-1, sigma_scaling=True):
+        #TODO-Documentation
         """Compute cost"""
         # start_t = time.time()
         cost_map = np.zeros(self.img_detector.img_edge_scores[frame].shape)
@@ -634,7 +573,21 @@ class CameraLidarCalibrator:
         gc.collect()
         return -np.sum(cost_map)
 
-    def compute_corresp_cost(self, norm="L2"):
+    def compute_corresp_cost(self, norm_thresh=5):
+        """Compute re-projection error for all correspondences.
+
+        For each of the 2D-3D correspondences, project the 3D points onto the
+        image and compute the L2-distance to the corresponding 2D pixel.
+
+        :norm_thresh: Floating point threshold. If the absolute distance between
+                      a correspondence is above this, the distance is squared.
+                      Else the absolute distance is directly taken. Distances
+                      are summed and averaged. Offset value is used to shift
+                      the minimum to a strong negative value.
+
+        :return: Floating point, average distance penalty across all
+                 correspondences.
+        """
         """Return average distance between all correspondences"""
         pixel_distances = []
         num_corresp = 0
@@ -656,39 +609,36 @@ class CameraLidarCalibrator:
 
         total_dist = 0
         for dist in pixel_distances:
-            if dist <= 5:
+            if dist <= norm_thresh:
                 total_dist += dist
             else:
                 total_dist += (dist**2)
         average_dist = total_dist/num_corresp
         return -dist_offset + 3*average_dist
 
-    def compute_chamfer_dists(self):
-        total_dist = 0
-        total_edge_pts = 0
-        for frame_idx in range(self.num_frames):
-            cam_edges = self.img_detector.imgs_edges[frame_idx]
-            cam_edges_inv = 255*np.logical_not(cam_edges).astype(np.uint8)
-            cam_dist_map = cv.distanceTransform(cam_edges_inv, cv.DIST_L2,
-                                                cv.DIST_MASK_PRECISE)
-            lid_edges = self.draw_edge_points_binary(frame_idx)
-            num_edge_pts = lid_edges.sum()
-            dist = np.multiply(lid_edges, cam_dist_map).sum()
-
-            total_dist += dist
-            total_edge_pts += num_edge_pts
-
-        return total_dist/total_edge_pts
-
     def compute_points_cost(self, frame=-1):
-        """Penalize the deviation from the initial number of points for
-        each frame."""
+        """Compute the change in the number of points compared to at the start
+        of optimization. Return the absolute difference.
+
+        :param frame: Integer index indicating which image-scan pair to use.
+        :return: Absolute integer difference in number of projected points.
+        """
         num_points = self.projection_mask[frame].sum()
         points_diff = abs(self.numpoints_preopt[frame] - num_points)
         return points_diff
 
-    def ls_optimize(self, hyperparams, maxiter=600, save_every=100):
-        """Optimize cost over all image-scan pairs."""
+    def ls_optimize(self, hyperparams, maxiter=600):
+        """Optimize over extrinsics and return the optimized parameters.
+
+
+
+        :param hyperparams: Dictionary with scaling coefficients for each cost
+                            component, sigma value for GMM, and scaling array
+                            for the extrinsics vector during optimization.
+        :param maxiter: Integer limit for number of optimizer iterations.
+        :return: [tau, cost]. tau is a (6, 1) optimized extrinsics vector.
+                 cost is a list with the history of loss over the optimization.
+        """
         cost_history = []
 
         # Store initial number of points for points-based cost
@@ -696,13 +646,12 @@ class CameraLidarCalibrator:
                                  for i in range(self.num_frames)]
 
         # Generate initial simplex for Nelder-Mead
-        initial_deltas = [0.10, 0.10, 0.10, 1.0, 1.0, 1.0]
+        initial_deltas = [0.10, 0.10, 0.10, 0.5, 0.5, 0.5]
         opt_options = {'disp': True, 'maxiter': maxiter, 'adaptive': True,
                        'initial_simplex': get_mixed_delta_simplex(self.tau,
-                                                                  initial_deltas,
-                                                                  scales=hyperparams['scales'])}
+                                          initial_deltas,
+                                          scales=hyperparams['scales'])}
         self.num_iterations = 0
-        self.opt_save_every = save_every
 
         def loss_callback(xk, state=None):
             """Save loss graph and point-cloud projection for debugging"""
@@ -713,12 +662,12 @@ class CameraLidarCalibrator:
                 plt.plot(cost_history)
                 plt.savefig('current_loss.png')
 
-            if self.num_iterations % self.opt_save_every == 0:
-                img = self.draw_all_points()
-                cv.imwrite('current_projection.jpg', img)
+            img = self.draw_all_points()
+            cv.imwrite('current_projection.jpg', img)
             return False
 
         update_deltas = [0.10, 0.10, 0.10, 0.5, 0.5, 0.5]
+
         def bh_callback(x, f, accepted):
             print(f"Minimum found at x: {x}, f: {f}. Accepted: {accepted}")
 
@@ -732,172 +681,60 @@ class CameraLidarCalibrator:
             return False
 
         # Compute cost
-        start = time.time()
         tau_scaled = np.divide(self.tau, hyperparams['scales'])
+        if hyperparams['alphas']['corr'] == 0:
+            # Nelder-Mead
+            opt_results = minimize(loss,
+                                   tau_scaled,
+                                   method='Nelder-Mead',
+                                   args=(self, hyperparams, cost_history),
+                                   options=opt_options,
+                                   callback=loss_callback)
+            self.tau = np.multiply(opt_results.x, hyperparams['scales'])
 
-        # Nelder-Mead
-        # opt_results = minimize(loss,
-        #                        tau_scaled,
-        #                        method='Nelder-Mead',
-        #                        args=(self, hyperparams, cost_history, False),
-        #                        options=opt_options,
-        #                        callback=loss_callback)
-        # self.tau = np.multiply(opt_results.x, hyperparams['scales'])
+        else:
+            # Basin-Hopping
+            step_vector = [0.10, 0.10, 0.10, 1.0, 1.0, 1.0]
+            opt_results = basinhopping(loss, tau_scaled, 10, T=1.5,
+                                       niter_success=3,
+                                       disp=True, callback=bh_callback,
+                                       take_step=RandomDisplacement(step_vector),
+                                       minimizer_kwargs={'method': 'Nelder-Mead',
+                                                         'args': (self, hyperparams,
+                                                                 cost_history),
+                                                         'callback': loss_callback,
+                                                         'options': opt_options})
+            self.tau = np.multiply(opt_results.lowest_optimization_result.x,
+                                   hyperparams['scales'])
 
-        # Basin-Hopping
-        step_vector = [0.10, 0.10, 0.10, 1.0, 1.0, 1.0]
-        opt_results = basinhopping(loss, tau_scaled, 10, T=1.5,
-                                   niter_success=3,
-                                   disp=True, callback=bh_callback,
-                                   take_step=RandomDisplacement(step_vector),
-                                   minimizer_kwargs={'method': 'Nelder-Mead',
-                                                     'args': (self, hyperparams,
-                                                             cost_history,
-                                                             False),
-                                                     'callback': loss_callback,
-                                                     'options': opt_options})
-        self.tau = np.multiply(opt_results.lowest_optimization_result.x,
-                               hyperparams['scales'])
-
-        print(f"NL optimizer time={time.time() - start}")
         return self.tau, cost_history
 
 
-    def batch_optimization(self, sigma_in=6):
-        # cost_history = []
-        self.num_iterations = 0
-        def loss(tau_init, calibrator, sigma, cost_history):
-            local_cost = []
-            calibrator.tau = tau_init
-            calibrator.project_point_cloud()
-            # print(len(calibrator.projected_points))
-            for i in range(len(calibrator.img_detector.imgs)):
-                hm_ptc = calibrator.compute_heat_map(
-                    sigma=sigma, frame=i, ptCloud=True)
-                hm_img = calibrator.compute_heat_map(
-                    sigma=sigma, frame=i, ptCloud=False)
-                diff = hm_img - hm_ptc
-                # cost = -np.linalg.norm(diff, ord=2)
-                local_cost.append(np.linalg.norm(diff, ord=2))
+def loss(tau_scaled, calibrator, hyperparams, cost_history):
+    """For each image-scan pair, project the pointcloud with current extrinsics,
+    compute the loss components (mutual information, GMM, correspondence, and
+    points). Scale the components and return the sum.
 
-            cost_history.append(np.sum(local_cost))
-
-            if self.num_iterations % 100 == 0:
-                img = self.draw_all_points(frame=0)
-                cv.imwrite('generated/'+ str(self.num_iterations) + '.jpg', img)
-            self.num_iterations += 1
-            print((cost_history[-1]))
-
-            return cost_history[-1]
-
-        start = time.time()
-        threshold = 0.05
-        err = np.random.uniform(-threshold, threshold, (6,))
-        self.tau += err
-        while sigma_in > 1:
-            cost_history = []
-            opt_results = minimize(loss,
-                                self.tau + err,
-                                method='Nelder-Mead',
-                                args=(
-                                self, sigma_in, cost_history))#,
-                                #options=opt_options,
-                                #callback=loss_callback)
-            sigma_in -= 3
-            cost_history = np.array(cost_history)
-            print(cost_history.shape)
-
-            plt.plot(range(len(cost_history)), cost_history)           
-
-        print(f"Batch optimizer time={time.time() - start}")
-
-        # fig, ax = plt.subplots(len(self.img_detector.imgs))
-        # # sys.exit()
-        # for i in range(len(ax)):
-        #     ax[i].plot(range(len(cost_history)), cost_history[:, i])
-        plt.show()
-        img = self.draw_all_points(frame=0)
-        cv.imwrite('generated/'+ str(self.num_iterations) + '.jpg', img)
-        self.tau = opt_results.x
-        return opt_results.x
-
-    def compute_heat_map(self,
-                         sigma,
-                         frame=-1,
-                         ptCloud=False,
-                         show=False):
-        """Compute heat map"""
-        # start_t = time.time()
-        cost_map = np.zeros(self.img_detector.img_edge_scores[frame].shape)
-        gauss2d = getGaussianKernel2D(sigma, False)
-        if ptCloud:
-            for idx_pc in range(self.pc_detector.pcs_edge_idxs[frame].shape[0]):
-
-                idx = self.pc_detector.pcs_edge_idxs[frame][idx_pc]
-
-                # check if projected projected point lands within image bounds
-                if not self.projection_mask[frame][idx]:
-                    continue
-
-                mu_x, mu_y = self.projected_points[frame][idx].astype(np.int)
-                # Get gaussian kernel
-                # Distance > 3 sigma is set to 0
-                # and normalized so that the total Kernel = 1
-
-                top, bot, left, right = get_boundry(
-                    self.img_detector.img_edge_scores[frame], (mu_y, mu_x),
-                    int(sigma))
-
-                kernel_patch = gauss2d[3 * int(sigma) - top:3 * int(sigma) +
-                                       bot, 3 * int(sigma) -
-                                       left:3 * int(sigma) + right].copy()
-
-                # Normalize by number of edge projected_points in the neighborhood
-                cost_map[mu_y - top:mu_y + bot,
-                         mu_x - left:mu_x + right] += kernel_patch
-            threshold = np.amax(gauss2d)
-            cost_map[cost_map < threshold] = 0
-            if show:
-                plot_2d(cost_map,
-                        figname='generated/heat_map_ptc_{}'.format(frame))
-            gc.collect()
-            return cost_map
-
-        for mu_x in range(self.img_detector.imgs_edges[frame].shape[1]):
-            for mu_y in range(self.img_detector.imgs_edges[frame].shape[0]):
-                # mu_x, mu_y = self.projected_points[frame][idx].astype(np.int)
-                if not self.img_detector.imgs_edges[frame][mu_y, mu_x]:
-                    continue
-
-                top, bot, left, right = get_boundry(
-                    self.img_detector.img_edge_scores[frame], (mu_y, mu_x),
-                    int(sigma))
-
-                kernel_patch = gauss2d[3 * int(sigma) - top:3 * int(sigma) +
-                                       bot, 3 * int(sigma) -
-                                       left:3 * int(sigma) + right].copy()
-
-                cost_map[mu_y - top:mu_y + bot,
-                         mu_x - left:mu_x + right] += kernel_patch
-
-        threshold = np.amax(gauss2d)
-        cost_map[cost_map < threshold] = 0
-        if show:
-            plot_2d(cost_map, figname='generated/heat_map_img_{}'.format(frame))
-        gc.collect()
-        return cost_map
-
-
-def loss(tau_scaled, calibrator, hyperparams, cost_history,
-         return_components=False):
-    """Compute loss for given tau with hyperparams dict. If return components
-    is true, returns list of components instead of their sum. Hyperparams dict
-    must have the keys ['alphas', 'scales'], where hyperparams['alphas']
-    contains the coefficients for each component
+    Hyperparams dict must have the keys ['alphas', 'scales'], where
+    hyperparams['alphas'] contains the coefficients for each component
     ['mi', 'gmm', 'points', 'corr', 'sigma'],
 
-    hyperparams['scales'] describes how each parameter axis is
-    normalized in the optimization."""
+    Hyperparams['scales'] describes how each parameter axis is
+    normalized in the optimization.
+
+    :param tau_scaled: (6, 1) extrinsics parameters.
+    :param calibrator: CameraLidarCalibrator object containing loaded image-scan
+                       pairs and the detected edge pixels and points.
+    :param hyperparams: Dictionary with scaling coefficients and extrinsics
+                        scaling vector.
+    :param cost_history: List with current history of the loss over
+                         the optimization.
+    :return: Combined loss with each component scaled using the coefficients
+             in hyperparams dictionary.
+    """
+
+    """Compute loss for given tau with hyperparams dict. If return components
+    is true, returns list of components instead of their sum. """
 
     # Rescale Extrinsics
     tau = np.multiply(tau_scaled, hyperparams['scales'])
@@ -929,33 +766,9 @@ def loss(tau_scaled, calibrator, hyperparams, cost_history,
 
     total_cost = sum(cost_components)
     cost_history.append(total_cost)
-
-    print(cost_components)
-    if return_components:
-        return cost_components
-    else:
-        return sum(cost_components)
+    return sum(cost_components)
 
 
-def drawlines(img1, img2, lines, pts1, pts2):
-    ''' img1 - image on which we draw the epilines for the points in img2
-        lines - corresponding epilines '''
-    r, c = img1.shape[:2]
-    img1 = img1.copy()
-    img2 = img2.copy()
-    dists1 = []
-    dists2 = []
-    for r, pt1, pt2 in zip(lines, pts1, pts2):
-        color = tuple(np.random.randint(0, 255, 3).tolist())
-        x0, y0 = map(int, [0, -r[2] / r[1]])
-        x1, y1 = map(int, [c, -(r[2] + r[0] * c) / r[1]])
-        img1 = cv2.line(img1, (x0, y0), (x1, y1), color, 1)
-        img1 = cv2.circle(img1, tuple(pt1), 5, color, -1)
-        img2 = cv2.circle(img2, tuple(pt2), 5, color, -1)
-    return img1, img2
-
-
-from scipy._lib._util import check_random_state
 class RandomDisplacement(object):
     """
     Add a random displacement of maximum size `stepsize` to each coordinate
