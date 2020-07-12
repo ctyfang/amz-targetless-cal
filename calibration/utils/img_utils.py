@@ -405,13 +405,13 @@ def draw_pc_points(img, pc, R, T, K, score=None, show=False):
 
 def draw_point_matches(img_1, points_1, img_2, points_2):
     h, w = img_1.shape[0], img_1.shape[1]
-    img_cat = np.concatenate([img_1, img_2], axis=1)
+    img_cat = np.concatenate([img_1, img_2], axis=0)
     img_cat = np.repeat(np.expand_dims(img_cat, axis=2), 3, axis=2)
 
     for point_idx in range(points_1.shape[0]):
         pt_1 = points_1[point_idx, :]
         pt_2 = points_2[point_idx, :]
-        pt_2[0] += w
+        pt_2[1] += h
 
         color = (np.random.uniform()*255.0,
                  np.random.uniform()*255.0,

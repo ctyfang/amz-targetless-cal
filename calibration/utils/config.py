@@ -8,6 +8,10 @@ def command_line_parser():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
 
+    parser.add_argument(
+        '--data_dir_structure', type=str, default='kitti',
+        help='Structure of the data directory. one of ["custom", "kitti"]')
+
     # For PcEdgeDetector
     parser.add_argument(
         '--pc_dir', type=str, default='',
@@ -19,16 +23,16 @@ def command_line_parser():
              'while debugging')
 
     parser.add_argument(
-        '--pc_ed_rad_nn', type=float, default=0.1,
+        '--pc_ed_rad_nn', type=float, default=0.3,
         help='Radius in which to include neighbors during point cloud edge '
              'detection')
 
     parser.add_argument(
-        '--pc_ed_num_nn', type=float, default=75,
+        '--pc_ed_num_nn', type=float, default=150,
         help='Min number of nearest neighbors used')
 
     parser.add_argument(
-        '--pc_ed_score_thr', type=float, default=60,
+        '--pc_ed_score_thr', type=float, default=50,
         help='Percentile threshold above which points are considered edge '
              'points')
 
@@ -37,7 +41,7 @@ def command_line_parser():
         help='Method used for image edge detection: sed or canny')
 
     parser.add_argument(
-        '--im_ed_score_thr', type=float, default=0.25,
+        '--im_ed_score_thr', type=float, default=95,
         help='Threshold used for SED')
 
     parser.add_argument(

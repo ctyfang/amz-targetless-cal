@@ -322,9 +322,9 @@ def gen_synthetic_image(pc, refl, R, T, K, img_dims, fill_rad=3,
     K = K.reshape((3, 3))
 
     """Remove points behind the vehicle"""
-    pc_mask = np.logical_and(pc[:, 0] > 0, pc[:, 0] < 30)
-    pc = pc[pc_mask, :]
-    refl = refl[pc_mask]
+    # pc_mask = np.logical_and(pc[:, 0] > 0, pc[:, 0] < 30)
+    # pc = pc[pc_mask, :]
+    # refl = refl[pc_mask]
 
     """Separate position from reflectance"""
     pc = pc[:, :3]

@@ -8,6 +8,7 @@ import sys
 
 from copy import deepcopy
 
+
 def load_cam_cal(calib_dir):
     """Get camera matrix for camera 0 given directory with KITTI calibration files"""
     with open(str(calib_dir) + '/calib_cam_to_cam.txt', "r") as file:
@@ -20,6 +21,18 @@ def load_cam_cal(calib_dir):
                                   .reshape(3, 4)[:3, :3]
 
                 return P_rect
+
+
+def load_cam_dist(calib_dir):
+    """Get camera distortion for camera 0 given directory with KITTI calibration files"""
+    with open(str(calib_dir) + '/calib_cam_to_cam.txt', "r") as file:
+        lines = file.readlines()
+
+        for line in lines:
+            (key, val) = line.split(':', 1)
+            if key == ('D_' + "00"):
+                dist_coeffs = np.fromstring(val, sep=' ')
+                return dist_coeffs
 
 
 def load_lid_cal(calib_dir):

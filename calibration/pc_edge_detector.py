@@ -16,10 +16,31 @@ class PcEdgeDetector:
     run edge-detection, and generate masks to extract edge points for
     projection during optimization."""
 
+    @staticmethod
+    def filter_y(pc):
+        mask1 = pc[:, 1] < 0
+        mask2 = np.linalg.norm(pc, axis=1, ord=2) < 15
+        mask = np.logical_and(mask1, mask2)
+        return pc[mask], mask
+
     def __init__(self, cfg, visualize=True):
-        self.pcs, self.reflectances = self.load_pcs(cfg.pc_dir,
-                                                    cfg.frames,
-                                                    subsample=cfg.pc_subsample)
+
+        if cfg.data_dir_structure == "kitti":
+            self.pcs, self.reflectances, self.scanline_idxs = self.load_pcs(cfg.pc_dir,
+                                                        cfg.frames,
+                                                        subsample=cfg.pc_subsample,
+                                                        filter=PcEdgeDetector.filter_y)
+        elif cfg.data_dir_structure == "custom":
+            self.pcs, self.reflectances = self.load_pcs_custom(cfg.pc_dir,
+                                                              cfg.frames,
+                                                              subsample=cfg.pc_subsample,
+                                                              filter=PcEdgeDetector.filter_y)
+
+        # if visualize:
+        #     for idx in range(len(self.pcs)):
+        #         self.pc_visualize_edges(self.pcs[idx],
+        #                                 range(self.pcs[idx].shape[0]),
+        #                                 np.linalg.norm(self.pcs[idx], axis=1, ord=2))
 
         self.pcs_edge_idxs = []
         self.pcs_edge_masks = []
@@ -38,7 +59,7 @@ class PcEdgeDetector:
         """
 
         # Init outputs
-        for pc, pc_cam_frame in zip(self.pcs, pcs_cam_frame):
+        for idx, [pc, pc_cam_frame] in enumerate(zip(self.pcs, pcs_cam_frame)):
             num_points = pc.shape[0]
             center_scores = np.zeros(num_points)
             planar_scores = np.zeros(num_points)
@@ -78,23 +99,23 @@ class PcEdgeDetector:
             pc_edge_scores_2 = (pc_edge_scores_2 - pc_edge_scores_2.min())/(pc_edge_scores_2.max() - pc_edge_scores_2.min())
             pc_edge_scores = pc_edge_scores_1*pc_edge_scores_2
 
-            # Calculate the depth discontinuity score
+            # # Calculate the depth discontinuity score
             depth_discontinuity_scores = self.compute_depth_discontinuity_score(
-                pc, self.PC_NUM_CHANNELS)
+                pc, self.PC_NUM_CHANNELS, scanline_idxs=self.scanline_idxs[idx])
             pc_edge_scores_3 = depth_discontinuity_scores
             pc_edge_scores_3 = (pc_edge_scores_3 - pc_edge_scores_3.min())/(pc_edge_scores_3.max() - pc_edge_scores_3.min())
             pc_edge_scores = pc_edge_scores*pc_edge_scores_3
 
-            # NMS
-            points_suppressed = 0
-            for point_idx in range(num_points):
-                curr_score = pc_edge_scores[point_idx]
-                neighbor_i = kdtree.query_ball_point(curr_xyz, 0.10)
-                neighbor_scores = pc_edge_scores[neighbor_i]
-
-                if (neighbor_scores > curr_score).any():
-                    pc_edge_scores[point_idx] = 0
-                    points_suppressed += 1
+            # # NMS
+            # points_suppressed = 0
+            # for point_idx in range(num_points):
+            #     curr_score = pc_edge_scores[point_idx]
+            #     neighbor_i = kdtree.query_ball_point(curr_xyz, 0.10)
+            #     neighbor_scores = pc_edge_scores[neighbor_i]
+            #
+            #     if (neighbor_scores > curr_score).any():
+            #         pc_edge_scores[point_idx] = 0
+            #         points_suppressed += 1
 
             self.pcs_edge_scores.append(pc_edge_scores)
             print(f"Total pc scoring time:{time.time() - start_t}")
@@ -120,36 +141,48 @@ class PcEdgeDetector:
                                         self.pcs_edge_scores[idx])
 
     @staticmethod
-    def load_pcs(path, frames, subsample=1.0):
+    def load_pcs(path, frames, subsample=1.0, filter=None):
         """Load pointclouds, separate XYZ and Reflectance components"""
         pcs = []
         reflectances = []
+        scanline_idx_array = []
 
-        if frames == -1:
-            frame_paths = sorted(
-                glob(os.path.join(path, 'velodyne_points', 'data', '*.bin')))
-        else:
+        frame_paths = sorted(
+            glob(os.path.join(path, 'velodyne_points', 'data', '*')))
+        _, ext = os.path.splitext(frame_paths[0])
+
+        if frames[0] != -1:
             frame_paths = [os.path.join(path, 'velodyne_points', 'data', str(
-                frame).zfill(10)) + ".bin" for frame in frames]
+                frame).zfill(10)) + ext for frame in frames]
 
         for path in frame_paths:
-            _, ext = os.path.splitext(path)
             if ext == '.bin':
                 curr_pc = (np.fromfile(path,
                                        dtype=np.float32).reshape(-1, 4))[:, :]
             elif ext == '.txt':
                 curr_pc = (np.loadtxt(path,
                                        dtype=np.float32).reshape(-1, 4))[:, :]
+            elif ext == '.npy':
+                curr_pc = (np.load(path))
+                curr_pc[:, 3] /= 255.0
             else:
                 print("Invalid point-cloud format encountered.")
                 exit()
 
             pc = curr_pc[:int(subsample * curr_pc.shape[0]), :3]
             refl = curr_pc[:int(subsample * curr_pc.shape[0]), 3]
+            scanline_idxs = curr_pc[:int(subsample * curr_pc.shape[0]), 5]
+
+            if filter:
+                pc, mask = filter(pc)
+                refl = refl[mask]
+                scanline_idxs = scanline_idxs[mask]
+
             pcs.append(pc)
             reflectances.append(refl)
+            scanline_idx_array.append(scanline_idxs)
 
-        return pcs, reflectances
+        return pcs, reflectances, scanline_idx_array
 
     @staticmethod
     def compute_centerscore(nn_xyz, center_xyz, max_nn_d):
@@ -185,7 +218,8 @@ class PcEdgeDetector:
         return planarity
 
     @staticmethod
-    def compute_depth_discontinuity_score(point_cloud, num_channels):
+    def compute_depth_discontinuity_score(point_cloud, num_channels,
+                                          scanline_idxs=None):
         """Description: Compute vertical edges using depth discontinuity as the edge indicator. First
                      the points of the point cloud are sorted according to their polar angle to
                      group the points into their corresponding channels. Then the points of the
@@ -195,18 +229,20 @@ class PcEdgeDetector:
                      it is considered an edge.
         Return:      A binary mask indicating edges in the point cloud."""
 
-        # Calculate the polar angle for every point
-        polar_angle = 180 * np.arctan2(point_cloud[:, 2], np.sqrt(
-            np.square(point_cloud[:, 0]) + np.square(point_cloud[:, 1]))) / np.pi
+        if scanline_idxs is None:
+            # Calculate the polar angle for every point
+            polar_angle = 180 * np.arctan2(point_cloud[:, 2], np.sqrt(
+                np.square(point_cloud[:, 0]) + np.square(point_cloud[:, 1]))) / np.pi
 
-        # Calculate 64 cluster means
-        max_polar_angle = np.max(polar_angle)
-        min_polar_angle = np.min(polar_angle)
-        # Calculate an initial guess
-        init_guess = np.linspace(
-            min_polar_angle, max_polar_angle, num=num_channels)
-        kmeans = KMeans(n_clusters=num_channels, init=init_guess.reshape(-1, 1)
-                        ).fit(polar_angle.reshape(-1, 1))
+            # Calculate 64 cluster means
+            max_polar_angle = np.max(polar_angle)
+            min_polar_angle = np.min(polar_angle)
+            # Calculate an initial guess
+            init_guess = np.linspace(
+                min_polar_angle, max_polar_angle, num=num_channels)
+            kmeans = KMeans(n_clusters=num_channels, init=init_guess.reshape(-1, 1)
+                            ).fit(polar_angle.reshape(-1, 1))
+            scanline_idxs = kmeans.labels_
 
         # Fill list with the idxs of edges
         edge_idxs = []
@@ -216,7 +252,7 @@ class PcEdgeDetector:
 
         for channel in range(num_channels):
             # Binary mask for the points of the current channel
-            current_channel_mask = (kmeans.labels_ == channel)
+            current_channel_mask = (scanline_idxs == channel)
             # Indices of the points of the current channel
             current_channel_idxs = np.argwhere(current_channel_mask)
             # Array of the points of the current channel

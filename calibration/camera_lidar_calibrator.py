@@ -23,12 +23,12 @@ from calibration.utils.pc_utils import *
 
 class CameraLidarCalibrator:
 
-    def __init__(self, cfg, visualize=False, tau_init=None):
+    def __init__(self, cfg, visualize=False, tau_init=None, undistort=False):
         self.visualize = visualize
         self.projected_points = []
         self.points_cam_frame = []
         self.projection_mask = []
-        self.K = np.asarray(cfg.K)
+        self.K = load_cam_cal(cfg.calib_dir)
         self.R, self.T = load_lid_cal(cfg.calib_dir)
         self.correspondences = []
 
@@ -44,11 +44,18 @@ class CameraLidarCalibrator:
         self.pc_detector = PcEdgeDetector(cfg, visualize=visualize)
         self.num_frames = len(self.img_detector.imgs)
 
+        # Undistort images
+        if undistort:
+            self.D = load_cam_dist(cfg.calib_dir)
+            for frame in range(self.num_frames):
+                self.img_detector.imgs[frame] = cv.undistort(self.img_detector.imgs[frame],
+                                                             self.K, self.D)
+
         # Calculate projected_points, points_cam_frame, projection_mask
         self.project_point_cloud()
 
         # User input of correspondences
-        self.select_correspondences()
+        # self.select_correspondences()
 
         # Detect edges
         self.img_detector.img_detect(method=cfg.im_ed_method,
@@ -73,7 +80,7 @@ class CameraLidarCalibrator:
         self.opt_save_every = 10
         self.num_iterations = 0
 
-    def select_correspondences(self):
+    def select_correspondences(self, scale=1.0):
         self.correspondences = []
 
         curr_img_name = "gray"
@@ -85,13 +92,14 @@ class CameraLidarCalibrator:
         curr_pc_pixels = None
         curr_pc = None
 
+        img_h, img_w, _ = self.img_detector.imgs[0].shape
         def correspondence_cb(event, x, y, flags, param):
             if event == cv.EVENT_LBUTTONDOWN:
                 if curr_img_name == "gray":
-                    ref_pt[0], ref_pt[1] = x, y
+                    ref_pt[0], ref_pt[1] = x/scale, y/scale
                 else:
                     d, i = pc_pixel_tree.query(
-                        np.asarray([x, y]).reshape((1, 2)), 1)
+                        np.asarray([x/scale, y/scale]).reshape((1, 2)), 1)
                     nearest_pixel = curr_pc_pixels[i, :].astype(np.uint)[0]
                     ref_pt[0], ref_pt[1] = nearest_pixel[0], nearest_pixel[1]
                     ref_pt_3D[:] = curr_pc[i, :]
@@ -127,7 +135,7 @@ class CameraLidarCalibrator:
                 curr_img = cv.circle(curr_img, tuple(ref_pt), radius=2,
                                      color=(255, 0, 0),
                                      thickness=-1)
-                cv.imshow("Correspondences", curr_img)
+                cv.imshow("Correspondences", cv.resize(curr_img, (int(img_w*scale), int(img_h*scale))))
                 key = cv.waitKey(1)
 
                 if key == ord('y'):
@@ -149,8 +157,9 @@ class CameraLidarCalibrator:
             lidar_points = np.asarray(lidar_points)
 
             if self.visualize:
-                cv.imshow("Matches", draw_point_matches(img_gray, gray_pixels,
-                                     img_synthetic, lidar_pixels))
+                cv.imshow("Matches", cv.resize(draw_point_matches(img_gray, gray_pixels,
+                                     img_synthetic, lidar_pixels),
+                                               (int(img_w*scale), int(img_h*2.0*scale))))
                 cv.waitKey(0)
                 cv.destroyAllWindows()
 
@@ -666,6 +675,7 @@ class CameraLidarCalibrator:
     def compute_chamfer_dists(self):
         total_dist = 0
         total_edge_pts = 0
+
         for frame_idx in range(self.num_frames):
             cam_edges = self.img_detector.imgs_edges[frame_idx]
             cam_edges_inv = 255*np.logical_not(cam_edges).astype(np.uint8)
@@ -747,7 +757,7 @@ class CameraLidarCalibrator:
         # Basin-Hopping
         step_vector = [0.10, 0.10, 0.10, 1.0, 1.0, 1.0]
         opt_results = basinhopping(loss, tau_scaled, 10, T=1.5,
-                                   niter_success=3,
+                                   niter_success=1,
                                    disp=True, callback=bh_callback,
                                    take_step=RandomDisplacement(step_vector),
                                    minimizer_kwargs={'method': 'Nelder-Mead',
@@ -910,13 +920,16 @@ def loss(tau_scaled, calibrator, hyperparams, cost_history,
         if hyperparams['alphas']['mi']:
             cost_components[0] += calibrator.compute_mi_cost(frame_idx)
 
-        if hyperparams['alphas']['gmm']:
-            cost_components[1] += calibrator.compute_conv_cost(hyperparams['alphas']['sigma'],
-                                                               frame_idx,
-                                                               sigma_scaling=False)
+        # if hyperparams['alphas']['gmm']:
+        #     # cost_components[1] += calibrator.compute_conv_cost(hyperparams['alphas']['sigma'],
+        #     #                                                    frame_idx,
+        #     #                                                    sigma_scaling=False)
 
         if hyperparams['alphas']['points']:
             cost_components[2] += calibrator.compute_points_cost(frame_idx)
+
+    if hyperparams['alphas']['gmm']:
+        cost_components[1] += calibrator.compute_chamfer_dists()
 
     if hyperparams['alphas']['corr']:
         cost_components[3] += calibrator.compute_corresp_cost()

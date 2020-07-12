@@ -13,12 +13,17 @@ from matplotlib.ticker import MaxNLocator
 class ImgEdgeDetector:
 
     def __init__(self, cfg, visualize=False):
-        self.imgs = self.load_imgs(cfg.img_dir, cfg.frames)
+        if cfg.data_dir_structure == 'custom':
+            self.imgs = self.load_imgs_custom(cfg.img_dir, cfg.frames)
+        elif cfg.data_dir_structure == 'kitti':
+            self.imgs = self.load_imgs(cfg.img_dir, cfg.frames)
+        else:
+            print("Invalid data directory structure.")
         self.img_edge_scores = []
         self.imgs_edges = []
-
         self.ed_thresh_low = cfg.im_ed_score_thr1
         self.ed_thresh_high = cfg.im_ed_score_thr2
+        self.ed_thresh = cfg.im_ed_score_thr
 
         # TODO: handle multiple images
         self.img_h, self.img_w = self.imgs[0].shape[:2]
@@ -58,7 +63,9 @@ class ImgEdgeDetector:
                 img_edge_scores = sed_model.detectEdges(img)
                 orientations = sed_model.computeOrientation(img_edge_scores)
                 img_edges = sed_model.edgesNms(img_edge_scores, orientations, r=2, s=0, m=1)
-                _, img_edges = cv.threshold(img_edges, 0.25, 1.0, cv.THRESH_BINARY)
+
+                thresh = np.percentile(img_edge_scores, self.ed_thresh)
+                _, img_edges = cv.threshold(img_edges, thresh, 1.0, cv.THRESH_BINARY)
                 img_edges = img_edges.astype(np.bool)
 
             img_edge_scores[~img_edges] = 0
@@ -107,14 +114,33 @@ class ImgEdgeDetector:
         """Load specified frames given KITTI dataset base-path. If frames=-1, loads all frames"""
         imgs = []
 
-        if frames == -1:
-            frame_paths = sorted(
-                glob(os.path.join(path, 'image_00', 'data', '*.png')))
-        else:
+        frame_paths = sorted(
+            glob(os.path.join(path, 'image_00', 'data', '*')))
+
+        if frames[0] != -1:
+            _, ext = os.path.splitext(frame_paths[0])
             frame_paths = [os.path.join(path, 'image_00', 'data', str(
-                frame).zfill(10)) + '.png' for frame in frames]
+                frame).zfill(10)) + ext for frame in frames]
 
         for path in frame_paths:
             imgs.append(cv.imread(path))
+
+        return imgs
+
+    @staticmethod
+    def load_imgs_custom(path, frames):
+        """Load specified frames given KITTI dataset base-path. If frames=-1, loads all frames"""
+        imgs = []
+
+        if frames == -1:
+            sub_dirs = os.listdir(path)
+        else:
+            sub_dirs = [os.path.join(path,
+                                     'data_pair_' + str(frame).zfill(2))
+                        for frame in frames]
+
+        for dir in sub_dirs:
+            img_path = os.path.join(dir, glob(os.path.join(dir, '*.png'))[0])
+            imgs.append(cv.imread(img_path))
 
         return imgs
