@@ -10,6 +10,10 @@ import sys
 from prettytable import PrettyTable
 from scipy.spatial.transform import Rotation as R
 
+# LOG_DIR = 'generated/logs'
+# filename_init = 'tau_inits_set3.npy'
+# filename_data = 'tau_data_set3.npy'
+# generated/logs/tau_init_set3_large_disturb.npy
 def outliers_iqr(ys):
     quartile_1, quartile_3 = np.percentile(ys, [25, 75])
     iqr = quartile_3 - quartile_1
@@ -40,7 +44,12 @@ with open(os.path.join(LOG_DIR, filename_init), 'rb') as f:
 with open(os.path.join(LOG_DIR, filename_data), 'rb') as f:
     tau_data = np.load(f)
 
+print(tau_inits.shape)
+print(tau_data.shape)
+sys.exit()
 fields = ['R1', 'R2', 'R3', 'X', 'Y', 'Z']
+R, T = load_lid_cal(calib_dir)
+tau_gt = CameraLidarCalibrator.transform_to_tau(R, T)
 # for idx in range(tau_data.shape[0]):
 #     tau_data[idx,:3] = \
 #         R.from_rotvec(tau_data[idx,:3]).as_euler('xyz', degrees=True)
@@ -121,3 +130,78 @@ print(table)
 table_data = table.get_string()
 with open(os.path.join(LOG_DIR, 'error_metrics.txt'), 'w') as table_file:
     table_file.write(table_data)
+
+# sys.exit()
+plt.figure()
+plt.clf()
+plt.subplot(1, 5, 1)
+plt.title('X')
+plt.scatter(range(tau_inits.shape[0]), tau_inits[:, 3], c='r')
+plt.scatter(range(tau_data.shape[0]), tau_data[:, 3], c='b')
+axes = plt.gca()
+xlims = axes.get_xlim()
+plt.hlines(tau_gt[3], xlims[0], xlims[1])
+
+plt.subplot(1, 5, 2)
+plt.title('Y')
+plt.scatter(range(tau_inits.shape[0]), tau_inits[:, 4], c='r')
+plt.scatter(range(tau_data.shape[0]), tau_data[:, 4], c='b')
+axes = plt.gca()
+xlims = axes.get_xlim()
+plt.hlines(tau_gt[4], xlims[0], xlims[1])
+
+plt.subplot(1, 5, 3)
+plt.title('Z')
+plt.scatter(range(tau_inits.shape[0]), tau_inits[:, 5], c='r')
+plt.scatter(range(tau_data.shape[0]), tau_data[:, 5], c='b')
+axes = plt.gca()
+xlims = axes.get_xlim()
+plt.hlines(tau_gt[5], xlims[0], xlims[1])
+
+plt.subplot(1, 5, 4)
+plt.title('Angle')
+angle_vec = np.linalg.norm(tau_data[:, :3], axis=1, ord=2)
+angle_gt = np.linalg.norm(tau_gt[:3], ord=2)
+angle_vec_init = np.linalg.norm(tau_inits[:, :3], axis=1, ord=2)
+plt.scatter(range(tau_inits.shape[0]), angle_vec_init, c='r')
+plt.scatter(range(tau_data.shape[0]), angle_vec, c='b')
+axes = plt.gca()
+xlims = axes.get_xlim()
+plt.hlines(angle_gt, xlims[0], xlims[1])
+
+plt.subplot(1, 5, 5)
+plt.title('Axis')
+axis_vec = tau_data[:, :3]/np.expand_dims(np.linalg.norm(tau_data[:, :3], axis=1, ord=2), 1)
+axis_gt = tau_gt[:3]/np.linalg.norm(tau_gt[:3], ord=2)
+axis_vec_init = tau_inits[:, :3] / np.expand_dims(np.linalg.norm(tau_inits[:, :3], axis=1, ord=2), 1)
+axis_diffs = np.linalg.norm(axis_vec - axis_gt, axis=1, ord=2)
+plt.scatter(range(axis_diffs.shape[0]), axis_diffs, c='b')
+axes = plt.gca()
+xlims = axes.get_xlim()
+plt.hlines(0, xlims[0], xlims[1])
+# plt.show()
+plt.savefig(os.path.join(LOG_DIR, 'extrinsics_deviation.png'))
+plt.show()
+
+# Mean, Median, Std Deviation
+table = PrettyTable()
+table.field_names = ["X_med", "X_std", "Y_med", "Y_std", "Z_med", "Z_std",
+                     "angle_med", "angle_std", "axis_med", "axis_std"]
+
+x_error = tau_data[:, 3] - tau_gt[3]
+y_error = tau_data[:, 4] - tau_gt[4]
+z_error = tau_data[:, 5] - tau_gt[5]
+angle_error = np.linalg.norm(tau_data[:, :3], ord=2, axis=1) - np.linalg.norm(tau_gt[:3], ord=2)
+axis_error = axis_diffs
+errors = [x_error, y_error, z_error, angle_error, axis_error]
+
+row = []
+for param_idx, param_name in enumerate(['X', 'Y', 'Z', 'angle', 'axis']):
+    row += [np.median(errors[param_idx]), np.std(errors[param_idx])]
+table.add_row(row)
+print(table)
+
+table_data = table.get_string()
+with open(os.path.join(LOG_DIR, 'error_metrics.txt'), 'w') as table_file:
+    table_file.write(table_data)
+
