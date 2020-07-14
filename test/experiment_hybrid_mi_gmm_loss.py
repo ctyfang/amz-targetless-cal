@@ -12,22 +12,23 @@ from prettytable import PrettyTable
 save_every = 1
 select_new_correspondences = False
 calibrator_path = '../generated/calibrators/0928-6frames.pkl'
-LOG_DIR = '../generated/optimizer_logs/test'
+LOG_DIR = '../generated/optimizer_logs/0928-6frames-chamfer'
 
 """Experiment parameters"""
-exp_params = {'NUM_SAMPLES': 10, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
-              'ALPHA_MI': [1], 'ALPHA_GMM': [5],
-              'ALPHA_POINTS': [0], 'ALPHA_CORR': [0],
+exp_params = {'NUM_SAMPLES': 100, 'TRANS_ERR_SIGMA': 0.10, 'ANGLE_ERR_SIGMA': 5,
+              'ALPHA_MI': [0.0], 'ALPHA_GMM': [1.0],
+              'ALPHA_POINTS': [0], 'ALPHA_CORR': [0.0],
               'SIGMAS': [7.0],
               'MAX_ITERS': 100, 'SCALES': np.power(10*np.ones((1, 6)),
                                                    [0, 0, 0, -2, -2, -2]).tolist()}
 
 """Default Hyperparameter Template"""
-hyperparams = {'alphas': {'mi': 1, 'gmm': 5, 'points': 0, 'corr': 0},
+hyperparams = {'alphas': {'mi': 0, 'gmm': 0, 'points': 0, 'corr': 1},
                'scales': exp_params['SCALES']}
 
 """Calibration directory specification"""
-calib_dir_list = ['/media/carter/Samsung_T5/3dv/2011_09_28/calibration',
+calib_dir_list = ['/home/carter/git/2011_09_28',
+                  '/media/carter/Samsung_T5/3dv/2011_09_28/calibration',
                   '/home/benjin/Development/Data/2011_09_26_calib/2011_09_26',
                   'data',
                   '/home/carter/pycharm_project_534/data/calibration',
@@ -51,7 +52,7 @@ exp_params['tau_gt'] = tau_gt.tolist()
 
 """Select correspondences and save calibrator"""
 if select_new_correspondences:
-    calibrator.select_correspondences()
+    calibrator.select_correspondences(scale=0.5)
     with open(calibrator_path, 'wb') as overwrite_pkl:
         pickle.dump(calibrator, overwrite_pkl)
 
@@ -72,12 +73,13 @@ for frame_idx in range(len(calibrator.img_detector.imgs)):
 """Run the experiment"""
 tau_data = []
 tau_inits = []
+
 for sample_idx in range(exp_params['NUM_SAMPLES']):
     print(f'----- SAMPLE {sample_idx} -----')
-    calibrator.update_extrinsics(perturb_tau(tau_gt,
-                                 trans_std=exp_params['TRANS_ERR_SIGMA'],
-                                 angle_std=exp_params['ANGLE_ERR_SIGMA']))
-    compare_taus(tau_gt, calibrator.tau)
+    # calibrator.update_extrinsics(perturb_tau(tau_gt,
+    #                              trans_std=exp_params['TRANS_ERR_SIGMA'],
+    #                              angle_std=exp_params['ANGLE_ERR_SIGMA']))
+    # compare_taus(tau_gt, calibrator.tau)
 
     calibrator.project_point_cloud()
     tau_inits.append(calibrator.tau)
@@ -141,12 +143,9 @@ for sample_idx in range(exp_params['NUM_SAMPLES']):
         cv.imwrite(os.path.join(LOG_DIR, f'trial_{sample_idx}', f'stage_{stage_idx}',
                                 f'edge_points_frame_{frame_idx}.jpg'), img_edges)
 
-"""Save initial taus, optimized taus, tau_scale"""
-tau_inits = np.asarray(tau_inits)
-np.save(os.path.join(LOG_DIR, 'tau_inits'), tau_inits)
-
-tau_data = np.asarray(tau_data)
-np.save(os.path.join(LOG_DIR, 'tau_data'), tau_data)
+    """Save initial taus, optimized taus, tau_scale"""
+    np.save(os.path.join(LOG_DIR, 'tau_inits'), np.asarray(tau_inits))
+    np.save(os.path.join(LOG_DIR, 'tau_data'), np.asarray(tau_data))
 
 plt.figure()
 plt.clf()
