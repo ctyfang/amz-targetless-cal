@@ -560,7 +560,7 @@ class CameraLidarCalibrator:
         if len(reflectance_vector) > 0 and len(grayscale_vector) > 0:
 
             joint_data = np.hstack([grayscale_vector, reflectance_vector])
-            intensity_vector = np.linspace(0, 255, 510)
+            intensity_vector = np.linspace(-0.0001, 255.0001, 510)
             grid_x, grid_y = np.meshgrid(intensity_vector,
                                          intensity_vector)
             grid_data = np.vstack([grid_y.ravel(), grid_x.ravel()])
@@ -781,29 +781,8 @@ class CameraLidarCalibrator:
             self.project_point_cloud()
             return self.compute_corresp_cost()[1]
 
-            if self.num_iterations % 100 == 0:
-                img = self.draw_all_points(frame=0)
-                cv.imwrite('generated/'+ str(self.num_iterations) + '.jpg', img)
-            self.num_iterations += 1
-            print((cost_history[-1]))
-
-            return cost_history[-1]
-
-        start = time.time()
         tau = self.tau.copy()
         cost_history = []
-            opt_results = minimize(loss,
-                                self.tau + err,
-                                method='Nelder-Mead',
-                                args=(
-                                self, sigma_in, cost_history))#,
-                                #options=opt_options,
-                                #callback=loss_callback)
-            sigma_in -= 3
-            cost_history = np.array(cost_history)
-            print(cost_history.shape)
-
-            plt.plot(range(len(cost_history)), cost_history)           
 
         opt_results = least_squares(loss_manual, tau, method='lm')
  
@@ -878,7 +857,6 @@ class CameraLidarCalibrator:
             plot_2d(cost_map, figname='generated/heat_map_img_{}'.format(frame))
         gc.collect()
         return cost_map
-
 
 def loss(tau_scaled, calibrator, hyperparams, cost_history,
          return_components=False):
