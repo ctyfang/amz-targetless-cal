@@ -670,7 +670,7 @@ class CameraLidarCalibrator:
             else:
                 total_dist += (dist**2)
         average_dist = total_dist/num_corresp
-        return -dist_offset + 3*average_dist
+        return -dist_offset + 3*average_dist, pixel_distances
 
     def compute_chamfer_dists(self):
         total_dist = 0
@@ -773,24 +773,13 @@ class CameraLidarCalibrator:
         return self.tau, cost_history
 
 
-    def batch_optimization(self, sigma_in=6):
-        # cost_history = []
-        self.num_iterations = 0
-        def loss(tau_init, calibrator, sigma, cost_history):
-            local_cost = []
-            calibrator.tau = tau_init
-            calibrator.project_point_cloud()
-            # print(len(calibrator.projected_points))
-            for i in range(len(calibrator.img_detector.imgs)):
-                hm_ptc = calibrator.compute_heat_map(
-                    sigma=sigma, frame=i, ptCloud=True)
-                hm_img = calibrator.compute_heat_map(
-                    sigma=sigma, frame=i, ptCloud=False)
-                diff = hm_img - hm_ptc
-                # cost = -np.linalg.norm(diff, ord=2)
-                local_cost.append(np.linalg.norm(diff, ord=2))
+    def batch_optimization(self, hyperparams):
 
-            cost_history.append(np.sum(local_cost))
+        def loss_manual(tau):
+            self.tau = tau
+            self.R, self.T = self.tau_to_transform(tau)
+            self.project_point_cloud()
+            return self.compute_corresp_cost()[1]
 
             if self.num_iterations % 100 == 0:
                 img = self.draw_all_points(frame=0)
@@ -801,11 +790,8 @@ class CameraLidarCalibrator:
             return cost_history[-1]
 
         start = time.time()
-        threshold = 0.05
-        err = np.random.uniform(-threshold, threshold, (6,))
-        self.tau += err
-        while sigma_in > 1:
-            cost_history = []
+        tau = self.tau.copy()
+        cost_history = []
             opt_results = minimize(loss,
                                 self.tau + err,
                                 method='Nelder-Mead',
@@ -819,17 +805,13 @@ class CameraLidarCalibrator:
 
             plt.plot(range(len(cost_history)), cost_history)           
 
-        print(f"Batch optimizer time={time.time() - start}")
-
-        # fig, ax = plt.subplots(len(self.img_detector.imgs))
-        # # sys.exit()
-        # for i in range(len(ax)):
-        #     ax[i].plot(range(len(cost_history)), cost_history[:, i])
-        plt.show()
-        img = self.draw_all_points(frame=0)
-        cv.imwrite('generated/'+ str(self.num_iterations) + '.jpg', img)
+        opt_results = least_squares(loss_manual, tau, method='lm')
+ 
         self.tau = opt_results.x
-        return opt_results.x
+        img = self.draw_all_points(frame=0)
+        cv.imwrite('generated/opted.jpg', img)
+        
+        return opt_results.x, cost_history
 
     def compute_heat_map(self,
                          sigma,
@@ -932,7 +914,7 @@ def loss(tau_scaled, calibrator, hyperparams, cost_history,
         cost_components[1] += calibrator.compute_chamfer_dists()
 
     if hyperparams['alphas']['corr']:
-        cost_components[3] += calibrator.compute_corresp_cost()
+        cost_components[3] += calibrator.compute_corresp_cost()[0]
 
     # Scale loss components
     cost_components[0] *= hyperparams['alphas']['mi']
