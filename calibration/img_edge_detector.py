@@ -13,14 +13,18 @@ from matplotlib.ticker import MaxNLocator
 class ImgEdgeDetector:
 
     def __init__(self, cfg, visualize=False):
-        self.imgs = self.load_imgs(cfg.img_dir, cfg.frames)
+        if os.path.exists(cfg.dir):
+            self.imgs = self.load_imgs(cfg.dir, cfg.frames)
+        else:
+            print("Image directory does not exist.")
+            exit()
+
         self.img_edge_scores = []
         self.imgs_edges = []
 
-        self.ed_thresh_low = cfg.im_ed_score_thr1
-        self.ed_thresh_high = cfg.im_ed_score_thr2
+        self.ed_thresh_low = cfg.im_ced_score_lower_thr
+        self.ed_thresh_high = cfg.im_ced_score_upper_thr
 
-        # TODO: handle multiple images
         self.img_h, self.img_w = self.imgs[0].shape[:2]
         for frame_idx in range(len(self.imgs)):
             curr_h, curr_w = self.imgs[frame_idx].shape[:2]

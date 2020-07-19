@@ -10,24 +10,16 @@ def command_line_parser():
 
     # General Arguments
     parser.add_argument(
+        '--calibration_method', type=str, default='manual', required=True,
+        help='Calibration method to be used. One of ["manual", "automatic"]')
+
+    parser.add_argument(
         '--dir', type=str, default='', required=True,
         help='Path to directory containing point clouds, images and calibration')
 
     parser.add_argument(
-        '--frames', type=json.loads, default='[1, 6, 19]',
+        '--frames', type=json.loads, default='[1]',
         help='Initial guess of the transformation')
-
-    parser.add_argument(
-        '--tau_init', type=json.loads, default='[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]',
-        help='Initial guess of the transformation')
-
-    parser.add_argument(
-        '--K',
-        type=json.loads,
-        default='[[7.215377e+02, 0.000000e+00, 6.095593e+02], \
-                  [0.000000e+00, 7.215377e+02, 1.728540e+02], \
-                  [0.000000e+00, 0.000000e+00, 1.000000e+00]]',
-        help='3x3 camera matrix')
 
     parser.add_argument(
         '--sig_in', type=json.loads, default='[3.0 ,2.0 ,1.0]',

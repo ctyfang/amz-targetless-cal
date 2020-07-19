@@ -142,20 +142,6 @@ def print_projection_plt(points, color, image):
     return cv2.cvtColor(hsv_image, cv2.COLOR_HSV2RGB)
 
 
-def compute_timestamps(timestamps_f, ind):
-    # return timestamps of the the ind^th sample (line) in seconds
-    # in this code, timestamps_f can be 'image_02/timestamps.txt', 'oxts/timestamps.txt', 'velodyne_points/timestamps_start.txt', ...
-    #  'velodyne_points/timestamps_end.txt',  or 'velodyne_points/timestamps.txt'. ind is the index (name) of the sample like '0000000003'
-    with open(timestamps_f) as f:
-        timestamps_ = f.readlines()
-        #file_id = file[7:10]
-        timestamps_ = timestamps_[int(ind)]
-        timestamps_ = timestamps_[11:]
-        timestamps_ = np.double(timestamps_[
-                                :2]) * 3600 + np.double(timestamps_[3:5]) * 60 + np.double(timestamps_[6:])
-    return timestamps_
-
-
 def skew(vector):
     """
     this function returns a numpy array with the skew symmetric cross product matrix for vector.
@@ -224,48 +210,18 @@ def perturb_tau(tau_in, trans_std=0.05, angle_std=2.5):
     return np.asarray([rot_vec_new, trans_vec_new]).reshape(tau_in.shape)
 
 
-def calc_MI(x, y, bins):
-    c_xy = np.histogram2d(x, y, bins)[0]
-    mi = mutual_info_score(None, None, contingency=c_xy)
-    return mi
-
-
-def extrinsics_error(tau_true, tau_pred):
-    error_dict = {}
-
-    x_err = abs(tau_true[3] - tau_pred[3])
-    y_err = abs(tau_true[4] - tau_pred[4])
-    z_err = abs(tau_true[5] - tau_pred[5])
-    angle_err = abs(np.linalg.norm(tau_true[:3], 2) - np.linalg.norm(tau_pred[:3], 2))
-    axis_err = np.linalg.norm(tau_true[:3]/np.linalg.norm(tau_true[:3], 2) -
-                              tau_pred[:3]/np.linalg.norm(tau_pred[:3], 2))
-
-    error_dict['x'] = x_err
-    error_dict['y'] = y_err
-    error_dict['z'] = z_err
-    error_dict['axis'] = axis_err
-    error_dict['angle'] = angle_err
-    return error_dict
-
-
-def get_bounds(tau_quat_init, trans_range=0.25):
-    x_bounds = [tau_quat_init[4] - trans_range, tau_quat_init[4] + trans_range]
-    y_bounds = [tau_quat_init[5] - trans_range, tau_quat_init[5] + trans_range]
-    z_bounds = [tau_quat_init[6] - trans_range, tau_quat_init[6] + trans_range]
-
-    return [[-1, 1], [-1, 1], [-1, 1], [-1, 1], x_bounds, y_bounds, z_bounds]
-
-
-def get_trans_bounds(trans_vec, trans_range=0.25):
-    x_bounds = [trans_vec[0] - trans_range, trans_vec[0] + trans_range]
-    y_bounds = [trans_vec[1] - trans_range, trans_vec[1] + trans_range]
-    z_bounds = [trans_vec[2] - trans_range, trans_vec[2] + trans_range]
-
-    return [x_bounds, y_bounds, z_bounds]
-
-
 def get_initial_simplex(x0, nonzdelt=0.05, zdelt=0.00025):
+    """
+    Generate a simplex from an initial guess by modifying each dimension of the
+    initial guess. For x0 (D, ), a (D+1, D) simplex is generated. In each
+    dimension, if x0(i) == 0, the axis is scaled by (1+zdelt), else it
+    is scaled by (1+nonzdelt).
 
+    :param x0: Initial point to build simplex around.
+    :param deltas: scaling parameter for non-zero axes
+    :param zdelt: scaling parameter for zero axes
+    :return: (D+1, D) simplex
+    """
     D = np.max(x0.shape)
     simplex = np.zeros((D+1, D))
     simplex[0, :] = x0
@@ -283,7 +239,18 @@ def get_initial_simplex(x0, nonzdelt=0.05, zdelt=0.00025):
 def get_mixed_delta_simplex(x0, deltas, zdelt=[0.00025, 0.00025, 0.00025,
                                                0.00025, 0.00025, 0.00025],
                             scales=np.ones((1, 6))):
+    """
+    Generate a simplex from an initial guess by modifying each dimension of the
+    initial guess. For x0 (D, ), a (D+1, D) simplex is generated. In each
+    dimension, if x0(i) == 0, the axis is scaled by (1+zdelt(i)), else it
+    is scaled by (1+deltas(i)).
 
+    :param x0: Initial point to build simplex around.
+    :param deltas: (D, ) array of scaling parameters for non-zero axes
+    :param zdelt: (D, ) array of scaling parameters for zero axes
+    :param scales: (D, ) Optional output scaling of the final simplex vertices
+    :return: (D+1, D) simplex
+    """
     D = np.max(x0.shape)
     simplex = np.zeros((D+1, D))
     simplex[0, :] = np.divide(x0, scales)

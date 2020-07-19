@@ -1,17 +1,11 @@
 from datetime import datetime
-import itertools as iter
 import gc
 
-import matplotlib.pyplot as plt
-from pyquaternion import Quaternion
 from KDEpy import FFTKDE
-import numpy as np
-import cv2 as cv
 
-import scipy
 from scipy._lib._util import check_random_state
-from scipy.optimize import least_squares, minimize, basinhopping
-from scipy.stats import multivariate_normal, entropy
+from scipy.optimize import minimize, basinhopping
+from scipy.stats import entropy
 from scipy.spatial.ckdtree import cKDTree
 
 from calibration.img_edge_detector import ImgEdgeDetector
@@ -37,8 +31,15 @@ class CameraLidarCalibrator:
         self.projected_points = []
         self.points_cam_frame = []
         self.projection_mask = []
-        self.K = np.asarray(cfg.K)
-        self.R, self.T = load_lid_cal(cfg.calib_dir)
+
+        calib_dir = os.path.join(cfg.dir, 'calibration')
+        if os.path.exists(calib_dir):
+            self.K = load_cam_cal(calib_dir)
+            self.R, self.T = load_lid_cal(calib_dir)
+        else:
+            print("Calibration directory does not exist")
+            exit()
+
         self.correspondences = []
 
         if tau_init:
@@ -52,24 +53,28 @@ class CameraLidarCalibrator:
         self.img_detector = ImgEdgeDetector(cfg, visualize=False)
         self.pc_detector = PcEdgeDetector(cfg, visualize=visualize)
         self.num_frames = len(self.img_detector.imgs)
+        print('Images and pointclouds loaded.')
 
         # Calculate projected_points, points_cam_frame, projection_mask
         self.project_point_cloud()
 
         # User input of correspondences
-        self.select_correspondences()
+        # self.select_correspondences()
 
         # Detect edges
+        print('Executing image edge-detection.')
         self.img_detector.img_detect(method=cfg.im_ed_method,
                                      visualize=visualize)
         gc.collect()
-
+        print('Image edge-detection completed.')
+        print('Executing point cloud edge-detection.')
         self.pc_detector.pc_detect(self.points_cam_frame,
                                    cfg.pc_ed_score_thr,
                                    cfg.pc_ed_num_nn,
                                    cfg.pc_ed_rad_nn,
                                    visualize=visualize)
         gc.collect()
+        print('Point Cloud edge-detection completed.')
 
         if visualize:
             # self.draw_all_points(score=self.pc_detector.pcs_edge_scores)
@@ -79,7 +84,6 @@ class CameraLidarCalibrator:
                                   image=self.img_detector.img_edge_scores[-1])
 
         # Optimization parameters
-        self.opt_save_every = 10
         self.num_iterations = 0
 
     def select_correspondences(self):
@@ -499,7 +503,7 @@ class CameraLidarCalibrator:
         if len(reflectance_vector) > 0 and len(grayscale_vector) > 0:
 
             joint_data = np.hstack([grayscale_vector, reflectance_vector])
-            intensity_vector = np.linspace(0, 255, 510)
+            intensity_vector = np.linspace(-1, 256, 510)
             grid_x, grid_y = np.meshgrid(intensity_vector, intensity_vector)
             grid_data = np.vstack([grid_y.ravel(), grid_x.ravel()])
             grid_data = grid_data.T
@@ -557,7 +561,7 @@ class CameraLidarCalibrator:
             # Get gaussian kernel
             # Distance > 3 sigma is set to 0
             # and normalized so that the total Kernel = 1
-            gauss2d = getGaussianKernel2D(sigma, False)
+            gauss2d = getGaussianKernel2D(sigma)
             top, bot, left, right = get_boundry(
                 self.img_detector.img_edge_scores[frame], (mu_y, mu_x),
                 int(sigma))
@@ -710,36 +714,26 @@ class CameraLidarCalibrator:
 
         # Compute cost
         tau_scaled = np.divide(self.tau, hyperparams['scales'])
-        if hyperparams['alphas']['corr'] == 0:
-            # Nelder-Mead
-            opt_results = minimize(loss,
-                                   tau_scaled,
-                                   method='Nelder-Mead',
-                                   args=(self, hyperparams, cost_history),
-                                   options=opt_options,
-                                   callback=loss_callback)
-            self.tau = np.multiply(opt_results.x, hyperparams['scales'])
 
-        else:
-            # Basin-Hopping
-            step_vector = [0.10, 0.10, 0.10, 1.0, 1.0, 1.0]
-            opt_results = basinhopping(
-                loss,
-                tau_scaled,
-                10,
-                T=1.5,
-                niter_success=3,
-                disp=True,
-                callback=bh_callback,
-                take_step=RandomDisplacement(step_vector),
-                minimizer_kwargs={
-                    'method': 'Nelder-Mead',
-                    'args': (self, hyperparams, cost_history),
-                    'callback': loss_callback,
-                    'options': opt_options
-                })
-            self.tau = np.multiply(opt_results.lowest_optimization_result.x,
-                                   hyperparams['scales'])
+        # Basin-Hopping
+        step_vector = [0.10, 0.10, 0.10, 1.0, 1.0, 1.0]
+        opt_results = basinhopping(
+            loss,
+            tau_scaled,
+            10,
+            T=1.5,
+            niter_success=3,
+            disp=True,
+            callback=bh_callback,
+            take_step=RandomDisplacement(step_vector),
+            minimizer_kwargs={
+                'method': 'Nelder-Mead',
+                'args': (self, hyperparams, cost_history),
+                'callback': loss_callback,
+                'options': opt_options
+            })
+        self.tau = np.multiply(opt_results.lowest_optimization_result.x,
+                               hyperparams['scales'])
 
         return self.tau, cost_history
 
@@ -794,6 +788,7 @@ def loss(tau_scaled, calibrator, hyperparams, cost_history):
     cost_components[2] *= hyperparams['alphas']['points']
     cost_components[3] *= hyperparams['alphas']['corr']
 
+    print(cost_components)
     total_cost = sum(cost_components)
     cost_history.append(total_cost)
     return sum(cost_components)

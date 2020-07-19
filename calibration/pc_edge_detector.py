@@ -9,7 +9,7 @@ from sklearn.cluster import KMeans
 import time
 import os
 from glob import glob
-
+from tqdm import tqdm
 
 class PcEdgeDetector:
     """Helper class for Calibrator. Load pointcloud files from .bin's,
@@ -17,9 +17,12 @@ class PcEdgeDetector:
     projection during optimization."""
 
     def __init__(self, cfg, visualize=True):
-        self.pcs, self.reflectances = self.load_pcs(cfg.pc_dir,
-                                                    cfg.frames,
-                                                    subsample=cfg.pc_subsample)
+        if os.path.exists(cfg.dir):
+            self.pcs, self.reflectances = self.load_pcs(cfg.dir,
+                                                        cfg.frames)
+        else:
+            print("Pointcloud directory does not exist.")
+            exit()
 
         self.pcs_edge_idxs = []
         self.pcs_edge_masks = []
@@ -45,7 +48,7 @@ class PcEdgeDetector:
 
             start_t = time.time()
             kdtree = ckdtree.cKDTree(pc)
-            for point_idx in range(num_points):
+            for point_idx in tqdm(range(num_points)):
                 curr_xyz = pc[point_idx, :]
 
                 neighbor_d1, neighbor_i1 = kdtree.query(curr_xyz, num_nn)
@@ -97,7 +100,6 @@ class PcEdgeDetector:
                     points_suppressed += 1
 
             self.pcs_edge_scores.append(pc_edge_scores)
-            print(f"Total pc scoring time:{time.time() - start_t}")
 
             # Remove all points with an edge score below the threshold
             thresh = np.percentile(pc_edge_scores, thresh)
