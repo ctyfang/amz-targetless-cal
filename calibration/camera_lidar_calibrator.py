@@ -527,6 +527,31 @@ class CameraLidarCalibrator:
             mi_cost = 0
         return -mi_cost
 
+    def compute_chamfer_dists(self):
+        """
+        For each image-scan pair, compute the chamfer distance. Count the number
+        of edge points used in the distance calculation.
+
+        :return: Average distance between edge points in a Lidar image and
+        camera image.
+        """
+        total_dist = 0
+        total_edge_pts = 0
+
+        for frame_idx in range(self.num_frames):
+            cam_edges = self.img_detector.imgs_edges[frame_idx]
+            cam_edges_inv = 255*np.logical_not(cam_edges).astype(np.uint8)
+            cam_dist_map = cv.distanceTransform(cam_edges_inv, cv.DIST_L2,
+                                                cv.DIST_MASK_PRECISE)
+            lid_edges = self.draw_edge_points_binary(frame_idx)
+            num_edge_pts = lid_edges.sum()
+            dist = np.multiply(lid_edges, cam_dist_map).sum()
+
+            total_dist += dist
+            total_edge_pts += num_edge_pts
+
+        return total_dist/total_edge_pts
+
     def compute_conv_cost(self, sigma_in, frame=-1, sigma_scaling=True):
         """For selected image-scan pair, compute GMM cost
 
@@ -772,15 +797,18 @@ def loss(tau_scaled, calibrator, hyperparams, cost_history):
         if hyperparams['alphas']['mi']:
             cost_components[0] += calibrator.compute_mi_cost(frame_idx)
 
-        if hyperparams['alphas']['gmm']:
-            cost_components[1] += calibrator.compute_conv_cost(
-                hyperparams['alphas']['sigma'], frame_idx, sigma_scaling=False)
+        # if hyperparams['alphas']['gmm']:
+        #     cost_components[1] += calibrator.compute_conv_cost(
+        #         hyperparams['alphas']['sigma'], frame_idx, sigma_scaling=False)
 
         if hyperparams['alphas']['points']:
             cost_components[2] += calibrator.compute_points_cost(frame_idx)
 
     if hyperparams['alphas']['corr']:
         cost_components[3] += calibrator.compute_corresp_cost()
+
+    if hyperparams['alphas']['gmm']:
+        cost_components[1] += calibrator.compute_chamfer_dists()
 
     # Scale loss components
     cost_components[0] *= hyperparams['alphas']['mi']
