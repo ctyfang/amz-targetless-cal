@@ -11,7 +11,9 @@ from matplotlib.ticker import MaxNLocator
 
 
 class ImgEdgeDetector:
-
+    """Helper class for CameraLidarCalibrator. Load images from .png's,
+    run edge-detection using Structured-Edge Detector or Canny to
+    extract edge points for projection during optimization."""
     def __init__(self, cfg, visualize=False):
         if os.path.exists(cfg.dir):
             self.imgs = self.load_imgs(cfg.dir, cfg.frames)
@@ -32,10 +34,17 @@ class ImgEdgeDetector:
                 self.img_h, curr_h), min(self.img_w, curr_w)
 
     def img_detect(self, method='canny', visualize=False):
-        '''
-        Compute pixel-wise edge score with non-maximum suppression
-        Scores are normalized so that maximum score is 1
-        '''
+        """
+        Detect edges on all the loaded images using Structured Edge Detector
+        or the Canny Edge Detector. For SED, the edge scores are the model
+        outputs. For Canny, the gradient magnitude is taken as the edge score.
+        Edge scores are normalized to the [0, 1] range. NMS is performed in
+        both cases.
+
+        :param method: one of ['canny', 'sed']
+        :param visualize: boolean, whether to show detected edge image or not.
+        """
+
         model = os.path.join(os.getcwd(), 'calibration/configs/sed_model.yml')
         sed_model = cv.ximgproc.createStructuredEdgeDetection(model)
         for img in self.imgs:
@@ -74,6 +83,12 @@ class ImgEdgeDetector:
             self.visualize_img_edges(range(len(self.imgs)))
 
     def visualize_img_edges(self, frames=[0]):
+        """
+        Given the frame index [0, num_frames_loaded], draw the edge image
+        colored by edge strength using matplotlib.pyplot.
+
+        :param frames: iterable, frames to draw the edges for
+        """
         im_x, im_y = np.meshgrid(
             np.linspace(0, self.img_edge_scores[0].shape[1],
                         self.img_edge_scores[0].shape[1] + 1),
@@ -108,7 +123,17 @@ class ImgEdgeDetector:
 
     @staticmethod
     def load_imgs(path, frames):
-        """Load specified frames given KITTI dataset base-path. If frames=-1, loads all frames"""
+        """
+        Load specified frames given KITTI dataset base-path. Base-path should
+        contain the image_00 directory. Frames is an iterable that contains
+        the indices of frames to be loaded. If frames=-1, loads all frames
+        in the directory
+
+        :param path: string, path to kitti directory containing image_00 dir
+        :param frames: iterable, or -1
+        :return:
+        """
+        """"""
         imgs = []
 
         if frames == -1:
