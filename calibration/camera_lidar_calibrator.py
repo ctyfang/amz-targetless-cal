@@ -4,7 +4,7 @@ import gc
 from KDEpy import FFTKDE
 
 from scipy._lib._util import check_random_state
-from scipy.optimize import minimize, basinhopping
+from scipy.optimize import minimize, basinhopping, least_squares
 from scipy.stats import entropy
 from scipy.spatial.ckdtree import cKDTree
 
@@ -40,7 +40,7 @@ class CameraLidarCalibrator:
             print("Calibration directory does not exist")
             exit()
 
-        self.correspondences = []
+        self.correspondences = [[], []]
 
         if tau_init:
             self.tau = tau_init
@@ -50,7 +50,7 @@ class CameraLidarCalibrator:
             self.tau = np.zeros((1, 6))
 
         # Load point clouds/images into the detectors
-        self.img_detector = ImgEdgeDetector(cfg, visualize=False)
+        self.img_detector = ImgEdgeDetector(cfg, visualize=visualize)
         self.pc_detector = PcEdgeDetector(cfg, visualize=visualize)
         self.num_frames = len(self.img_detector.imgs)
         print('Images and pointclouds loaded.')
@@ -165,7 +165,12 @@ class CameraLidarCalibrator:
 
                 elif key == ord('q'):
                     if points_selected % 2 == 0:
-                        break
+                        if points_selected / 2 < 6:
+                            print(
+                                f"Select at least 6 correspondences, currently {int(points_selected / 2)}"
+                            )
+                        else:
+                            break
                     else:
                         print("Uneven number of points. Select one more.")
 
@@ -633,6 +638,7 @@ class CameraLidarCalibrator:
 
         :return: Floating point, average distance penalty across all
                  correspondences.
+                 Array of distance penalty for each correspondence
         """
         """Return average distance between all correspondences"""
         pixel_distances = []
@@ -661,7 +667,7 @@ class CameraLidarCalibrator:
             else:
                 total_dist += (dist**2)
         average_dist = total_dist / num_corresp
-        return -dist_offset + 3 * average_dist
+        return -dist_offset + 3 * average_dist, pixel_distances
 
     def compute_points_cost(self, frame=-1):
         """Compute the change in the number of points compared to at the start
@@ -673,6 +679,34 @@ class CameraLidarCalibrator:
         num_points = self.projection_mask[frame].sum()
         points_diff = abs(self.numpoints_preopt[frame] - num_points)
         return points_diff
+
+    def batch_optimization(self):
+        """Optimize over extrinsics and return the optimized parameters
+           over least square cost.
+
+        :return: [tau, cost]. tau is a (6, 1) optimized extrinsics vector.
+                 cost is a list with the history of loss over the optimization.
+        """
+        
+        def loss_manual(tau):
+            self.tau = tau
+            self.R, self.T = self.tau_to_transform(tau)
+            self.project_point_cloud()
+            return self.compute_corresp_cost()[1]
+
+        tau = self.tau.copy()
+        print('Start optimization using manually selected correspondances')
+        opt_results = least_squares(loss_manual, tau, method='lm')
+ 
+        self.tau = opt_results.x
+        if self.visualize:
+            img = self.draw_all_points(frame=0)
+            cv.imshow('Projection with optimized tau', img)
+            cv.waitKey(2000)
+            cv.imwrite('generated/optimized.jpg', img)
+        print('Optimization completed.')
+        print(f'Optimized tau: {self.tau}')
+        return opt_results.x
 
     def ls_optimize(self, hyperparams, maxiter=600):
         """Optimize over extrinsics and return the optimized parameters.
