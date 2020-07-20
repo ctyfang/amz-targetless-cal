@@ -1,0 +1,21 @@
+[[source]]
+name = "pypi"
+url = "https://pypi.org/simple"
+verify_ssl = true
+
+[dev-packages]
+
+[packages]
+numpy = "==1.18.3"
+open3d = "==0.9.0"
+opencv-python = "==3.4.0.12"
+opencv-contrib-python = "==3.4.0.12"
+matplotlib = "==3.2.1"
+scipy = "==1.4.1"
+sklearn = "==0.0"
+pyquaternion = "==0.9.5"
+PrettyTable = "==0.7.2"
+KDEpy = "==1.0.5"
+
+[requires]
+python_version = "3.6"
