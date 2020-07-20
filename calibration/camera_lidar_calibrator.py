@@ -40,7 +40,7 @@ class CameraLidarCalibrator:
             print("Calibration directory does not exist")
             exit()
 
-        self.correspondences = [[], []]
+        self.correspondences = []
 
         if tau_init:
             self.tau = tau_init
@@ -704,8 +704,10 @@ class CameraLidarCalibrator:
             cv.imshow('Projection with optimized tau', img)
             cv.waitKey(2000)
             cv.imwrite('generated/optimized.jpg', img)
-        print('Optimization completed.')
-        print(f'Optimized tau: {self.tau}')
+
+        print('\n### Optimization completed ###')
+        print('xyz (m): ' + str(np.squeeze(self.tau)[:3]))
+        print('Rotation Vector: ' + str(np.squeeze(self.tau)[3:]))
         return opt_results.x
 
     def ls_optimize(self, hyperparams, maxiter=600):
