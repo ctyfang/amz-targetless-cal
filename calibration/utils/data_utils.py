@@ -9,7 +9,14 @@ import sys
 from copy import deepcopy
 
 def load_cam_cal(calib_dir):
-    """Get camera matrix for camera 0 given directory with KITTI calibration files"""
+    """
+    Given the directory path with the calibration file 'calib_cam_to_cam.txt',
+    open it and extract camera 0's intrinsic matrix from the projection
+    matrix
+
+    :param calib_dir: str, directory path with calibration txt file
+    :return: (3, 3) numpy array of camera intrinsics
+    """
     with open(str(calib_dir) + '/calib_cam_to_cam.txt', "r") as file:
         lines = file.readlines()
 
@@ -23,7 +30,13 @@ def load_cam_cal(calib_dir):
 
 
 def load_lid_cal(calib_dir):
-    """Get [R, T] that brings points from LiDAR frame to camera 0 frame."""
+    """
+    Given the directory path with the calibration file 'calib_velo_to_cam.txt',
+    open it and extract the extrinsics from LiDAR to camera
+
+    :param calib_dir: str, directory path with calibration txt file
+    :return: [R, T], (3x3) rotation matrix R, (3x1) translation vector T
+    """
     with open(str(calib_dir) + '/calib_velo_to_cam.txt', "r") as file:
         lines = file.readlines()
 
@@ -37,15 +50,16 @@ def load_lid_cal(calib_dir):
     return [R, T]
 
 
-def getPath(list_of_paths):
-    for path in list_of_paths:
-        if os.path.isdir(path):
-            return path
-    print("ERROR: Data paths don't exist!")
-    sys.exit()
-
-
 def load_from_bin(bin_path, incl_refl=False):
+    """
+    Given path to a pointcloud BIN file, load the XYZ data. Assumes XYZ
+    are the first three columns. Also returns reflectance if incl_refl
+    boolean is specified.
+
+    :param bin_path: str, path to pointcloud data file
+    :param incl_refl: boolean, whether to extract reflectance from the pc or not
+    :return: (N, 3) numpy array if only XYZ, (N, 4) if incl_refl is true
+    """
     # load point cloud from a binary file
     obj = np.fromfile(bin_path, dtype=np.float32).reshape(-1, 4)
 
@@ -56,7 +70,15 @@ def load_from_bin(bin_path, incl_refl=False):
 
 
 def load_from_csv(path, delimiter=',', skip_header=0, incl_refl=False):
-    # load point cloud from a csv file
+    """
+    Given path to a pointcloud CSV or TXT file, load the XYZ data. Assumes XYZ
+    are the first three columns. Also returns reflectance if incl_refl
+    boolean is specified.
+
+    :param bin_path: str, path to pointcloud data file
+    :param incl_refl: boolean, whether to extract reflectance from the pc or not
+    :return: (N, 3) numpy array if only XYZ, (N, 4) if incl_refl is true
+    """
     _, ext = os.path.splitext(path)
     if ext == '.csv':
         obj = np.genfromtxt(path, delimiter=delimiter,
@@ -86,48 +108,6 @@ def line_color(val, min_d=1, max_d=64):
     """
     alter_num = 4
     return (((val - min_d) % alter_num) * 127/alter_num).astype(np.uint8)
-
-
-def calib_velo2cam(filepath):
-    """
-    get Rotation(R : 3x3), Translation(T : 3x1) matrix info
-    using R,T matrix, we can convert velodyne coordinates to camera coordinates
-    """
-    with open(filepath, "r") as f:
-        file = f.readlines()
-
-        for line in file:
-            (key, val) = line.split(':', 1)
-            if key == 'R':
-                R = np.fromstring(val, sep=' ')
-                R = R.reshape(3, 3)
-            if key == 'T':
-                T = np.fromstring(val, sep=' ')
-                T = T.reshape(3, 1)
-    return R, T
-
-
-def calib_cam2cam(filepath, mode):
-    """
-    If your image is 'rectified image' :
-        get only Projection(P : 3x4) matrix is enough
-    but if your image is 'distorted image'(not rectified image) :
-        you need undistortion step using distortion coefficients(5 : D)
-
-    in this code, we'll get P matrix since we're using rectified image.
-    in this code, we set filepath = 'yourpath/2011_09_26_drive_0029_sync/calib_cam_to_cam.txt' and mode = '02'
-    """
-    with open(filepath, "r") as f:
-        file = f.readlines()
-
-        for line in file:
-            (key, val) = line.split(':', 1)
-            if key == ('P_rect_' + mode):
-                P_ = np.fromstring(val, sep=' ')
-                P_ = P_.reshape(3, 4)
-                # erase 4th column ([0,0,0])
-                P_ = P_[:3, :3]
-    return P_
 
 
 def print_projection_plt(points, color, image):
@@ -169,16 +149,35 @@ def jacobian(omega):
 
 
 def euler_to_quaternion(roll, pitch, yaw):
+    """
+    Convert euler angles in radians to a quaternion.
+
+    :param roll
+    :param pitch
+    :param yaw
+    :return: (4,) array of quaternion values
+    """
     qx = np.sin(roll / 2) * np.cos(pitch / 2) * np.cos(yaw / 2) - np.cos(roll / 2) * np.sin(pitch / 2) * np.sin(yaw / 2)
     qy = np.cos(roll / 2) * np.sin(pitch / 2) * np.cos(yaw / 2) + np.sin(roll / 2) * np.cos(pitch / 2) * np.sin(yaw / 2)
     qz = np.cos(roll / 2) * np.cos(pitch / 2) * np.sin(yaw / 2) - np.sin(roll / 2) * np.sin(pitch / 2) * np.cos(yaw / 2)
     qw = np.cos(roll / 2) * np.cos(pitch / 2) * np.cos(yaw / 2) + np.sin(roll / 2) * np.sin(pitch / 2) * np.sin(yaw / 2)
 
-    return [qw, qx, qy, qz]
+    return np.asarray([qw, qx, qy, qz]).reshape((4,))
 
-def perturb_tau(tau_in, trans_std=0.05, angle_std=2.5):
-    """Given the std deviations for translation and the rotation angle, perturb the axes of translation
-        independently, and the angle assuming axis-angle representation. Axis remains unchanged."""
+def perturb_tau(tau_in, trans_range=0.05, angle_range=2.5):
+    """
+    Given a (6, ) extrinsics array, tau_in, and ranges for the translation
+    and rotation disturbances, perturb tau_in and return the perturbed array.
+    tau_in[0:3] is a rotation vector. tau_in[3:] is a translation vector.
+    Rotation and translation errors are sampled uniformly. Translation error
+    is added to the translation vector. A noise rotation is generated using the
+    angle errors as euler angles.
+
+    :param tau_in: initial extrinsics vector
+    :param trans_range: range in meters to perturb the x, y, and z axes
+    :param angle_range: range in degrees to perturb the rotation parameters
+    :return: tau_perturbed
+    """
 
     # Unpack tau
     trans_vec = deepcopy(tau_in[3:])
@@ -187,12 +186,12 @@ def perturb_tau(tau_in, trans_std=0.05, angle_std=2.5):
     axis = rot_vec/angle
 
     # Sample noise
-    x_noise = np.random.uniform(-trans_std, trans_std)
-    y_noise = np.random.uniform(-trans_std, trans_std)
-    z_noise = np.random.uniform(-trans_std, trans_std)
-    rot_x_noise = np.deg2rad(np.random.uniform(-angle_std, angle_std))
-    rot_y_noise = np.deg2rad(np.random.uniform(-angle_std, angle_std))
-    rot_z_noise = np.deg2rad(np.random.uniform(-angle_std, angle_std))
+    x_noise = np.random.uniform(-trans_range, trans_range)
+    y_noise = np.random.uniform(-trans_range, trans_range)
+    z_noise = np.random.uniform(-trans_range, trans_range)
+    rot_x_noise = np.deg2rad(np.random.uniform(-angle_range, angle_range))
+    rot_y_noise = np.deg2rad(np.random.uniform(-angle_range, angle_range))
+    rot_z_noise = np.deg2rad(np.random.uniform(-angle_range, angle_range))
 
     # Add noise by sampling an added noisy rotation
     R_noise = Quaternion(euler_to_quaternion(rot_x_noise, rot_y_noise, rot_z_noise)).rotation_matrix
