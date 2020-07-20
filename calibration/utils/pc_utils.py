@@ -10,7 +10,6 @@ import cv2 as cv
 
 from copy import deepcopy
 from random import randint
-import time
 from time import sleep
 
 
