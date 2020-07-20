@@ -10,11 +10,11 @@ def command_line_parser():
 
     # General Arguments
     parser.add_argument(
-        '--calibration_method', type=str, default='manual', required=True,
+        '-cm', '--calibration_method', type=str, default='manual', required=True,
         help='Calibration method to be used. One of ["manual", "automatic"]')
 
     parser.add_argument(
-        '--dir', type=str, default='', required=True,
+        '-d', '--dir', type=str, default='', required=True,
         help='Path to directory containing point clouds, images and calibration')
 
     parser.add_argument(
