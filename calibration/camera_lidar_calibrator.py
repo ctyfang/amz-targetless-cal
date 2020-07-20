@@ -678,8 +678,6 @@ class CameraLidarCalibrator:
     def ls_optimize(self, hyperparams, maxiter=600):
         """Optimize over extrinsics and return the optimized parameters.
 
-
-
         :param hyperparams: Dictionary with scaling coefficients for each cost
                             component, sigma value for GMM, and scaling array
                             for the extrinsics vector during optimization.
@@ -687,6 +685,7 @@ class CameraLidarCalibrator:
         :return: [tau, cost]. tau is a (6, 1) optimized extrinsics vector.
                  cost is a list with the history of loss over the optimization.
         """
+        print("Executing optimization")
         cost_history = []
 
         # Store initial number of points for points-based cost
@@ -713,11 +712,11 @@ class CameraLidarCalibrator:
         def loss_callback(xk, state=None):
             """Save loss graph and point-cloud projection for debugging"""
             self.num_iterations += 1
-            if len(cost_history):
-                plt.close('all')
-                plt.figure()
-                plt.plot(cost_history)
-                plt.savefig('current_loss.png')
+            # if len(cost_history):
+            #     plt.close('all')
+            #     plt.figure()
+            #     plt.plot(cost_history)
+            #     plt.savefig('current_loss.png')
 
             img = self.draw_all_points()
             cv.imwrite('current_projection.jpg', img)
@@ -726,10 +725,8 @@ class CameraLidarCalibrator:
         update_deltas = [0.10, 0.10, 0.10, 0.5, 0.5, 0.5]
 
         def bh_callback(x, f, accepted):
-            print(f"Minimum found at x: {x}, f: {f}. Accepted: {accepted}")
-
             if accepted:
-                print(f"Modifying simplex")
+                print("New minimum discovered by Basin-Hopping.")
                 opt_options['initial_simplex'] = \
                     get_mixed_delta_simplex(np.multiply(x,
                                             hyperparams['scales']),
@@ -760,6 +757,8 @@ class CameraLidarCalibrator:
         self.tau = np.multiply(opt_results.lowest_optimization_result.x,
                                hyperparams['scales'])
 
+        print('Optimization completed.')
+        print('Optimized tau: ' + self.tau)
         return self.tau, cost_history
 
 
