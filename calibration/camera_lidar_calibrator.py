@@ -490,8 +490,7 @@ class CameraLidarCalibrator:
         self.project_point_cloud()
         grayscale_img = cv.cvtColor(self.img_detector.imgs[frame],
                                     cv.COLOR_BGR2GRAY)
-        projected_points_valid = self.projected_points[frame] \
-                                 [self.projection_mask[frame], :]
+        projected_points_valid = self.projected_points[frame][self.projection_mask[frame], :]
 
         grayscale_vector = np.expand_dims(
             grayscale_img[projected_points_valid[:, 1].astype(np.uint),
@@ -520,7 +519,7 @@ class CameraLidarCalibrator:
 
             joint_probs /= np.sum(joint_probs)
             mi_cost = entropy(gray_probs) + \
-                      entropy(refl_probs) - entropy(joint_probs)
+                entropy(refl_probs) - entropy(joint_probs)
             mi_cost = mi_cost
 
         else:
@@ -561,7 +560,7 @@ class CameraLidarCalibrator:
 
         :param: sigma_in: base standard deviation for gaussian kernel
         :param: frame: Integer index indicating the image-scan pair
-        :param: sigma_scaling: Boolean indicating whether to scale using the   
+        :param: sigma_scaling: Boolean indicating whether to scale using the
                                distance of each point
         :return: Negative of the GMM cost
         """
@@ -593,8 +592,8 @@ class CameraLidarCalibrator:
             # Get image patch inside the kernel
             edge_scores_patch = \
                 self.img_detector.img_edge_scores[frame][
-                mu_y - top:mu_y + bot,
-                mu_x - left:mu_x + right
+                    mu_y - top:mu_y + bot,
+                    mu_x - left:mu_x + right
                 ].copy()
 
             # weight = (normalized img score + normalized pc score) / 2
@@ -647,7 +646,7 @@ class CameraLidarCalibrator:
             lidar_points_cam = np.matmul(self.R, lidar_points.T) + self.T
             lidar_pixels_homo = (np.matmul(self.K, lidar_points_cam).T)
             lidar_pixels_homo = lidar_pixels_homo / \
-                                np.expand_dims(lidar_pixels_homo[:, 2], axis=1)
+                np.expand_dims(lidar_pixels_homo[:, 2], axis=1)
             lidar_pixels = lidar_pixels_homo[:, :2]
 
             pixel_diff = gray_pixels - lidar_pixels
@@ -729,7 +728,7 @@ class CameraLidarCalibrator:
                 print("New minimum discovered by Basin-Hopping.")
                 opt_options['initial_simplex'] = \
                     get_mixed_delta_simplex(np.multiply(x,
-                                            hyperparams['scales']),
+                                                        hyperparams['scales']),
                                             update_deltas,
                                             scales=hyperparams['scales'])
             return False
@@ -757,8 +756,9 @@ class CameraLidarCalibrator:
         self.tau = np.multiply(opt_results.lowest_optimization_result.x,
                                hyperparams['scales'])
 
-        print('Optimization completed.')
-        print('Optimized tau: ' + self.tau)
+        print('\n### Optimization completed ###')
+        print('xyz (m): ' + str(np.squeeze(self.tau)[:3]))
+        print('Rotation Vector: ' + str(np.squeeze(self.tau)[3:]))
         return self.tau, cost_history
 
 

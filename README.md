@@ -34,5 +34,15 @@ my_dir
 
 ## Usage
 ```
-python3 calibrate.py
+python calibrate.py --dir <path to kitti directory> --calibration_method <either "automatic" or "manual">
+python calibrate.py -d <path to kitti directory> -cm <either "automatic" or "manual">
+
+Example:
+python calibrate.py --dir data/0928-KITTI-dataset/ --calibration_method automatic
+
+The calibration result is then displayed in the consol after the algorithm has converged. Example:
+
+### Optimization completed ###
+xyz (m): [ 1.20684236 -1.21968689  1.20059145]
+Rotation Vector: [-0.02272116 -0.07837192 -0.34919117]
 ```
