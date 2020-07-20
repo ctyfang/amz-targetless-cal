@@ -18,7 +18,7 @@ def command_line_parser():
         help='Path to directory containing point clouds, images and calibration')
 
     parser.add_argument(
-        '--frames', type=json.loads, default='[1]',
+        '--frames', type=json.loads, default='-1',
         help='Initial guess of the transformation')
 
     parser.add_argument(

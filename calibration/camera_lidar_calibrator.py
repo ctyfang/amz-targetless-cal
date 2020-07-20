@@ -1,5 +1,6 @@
 from datetime import datetime
 import gc
+import warnings
 
 from KDEpy import FFTKDE
 
@@ -68,11 +69,14 @@ class CameraLidarCalibrator:
         gc.collect()
         print('Image edge-detection completed.')
         print('Executing point cloud edge-detection.')
-        self.pc_detector.pc_detect(self.points_cam_frame,
-                                   cfg.pc_ed_score_thr,
-                                   cfg.pc_ed_num_nn,
-                                   cfg.pc_ed_rad_nn,
-                                   visualize=visualize)
+        with warnings.catch_warnings():
+            # ignore runtime warning of ckdtree
+            warnings.simplefilter("ignore")
+            self.pc_detector.pc_detect(self.points_cam_frame,
+                                       cfg.pc_ed_score_thr,
+                                       cfg.pc_ed_num_nn,
+                                       cfg.pc_ed_rad_nn,
+                                       visualize=visualize)
         gc.collect()
         print('Point Cloud edge-detection completed.')
 

@@ -11,6 +11,7 @@ import os
 from glob import glob
 from tqdm import tqdm
 
+
 class PcEdgeDetector:
     """Helper class for Calibrator. Load pointcloud files from .bin's,
     run edge-detection, and generate masks to extract edge points for
@@ -41,7 +42,8 @@ class PcEdgeDetector:
         """
 
         # Init outputs
-        for pc, pc_cam_frame in zip(self.pcs, pcs_cam_frame):
+        for idx, (pc, pc_cam_frame) in enumerate(zip(self.pcs, pcs_cam_frame)):
+            print('Point Cloud #{}/{}'.format(idx+1, len(self.pcs)))
             num_points = pc.shape[0]
             center_scores = np.zeros(num_points)
             planar_scores = np.zeros(num_points)

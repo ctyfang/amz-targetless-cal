@@ -44,7 +44,7 @@ Example:
 ```
 python calibrate.py --dir data/0928-KITTI-dataset/ --calibration_method automatic
 ```
-For manual mode, click the feature in camera image and intensity image, confirm the selection with `Y`, and finish selection with `Q`
+For manual mode, click the feature in camera image and intensity image, confirm the selection with `y`, and finish selection with `q`
 
 The calibration result is then displayed in the consol after the algorithm has converged. Example:
 ```
