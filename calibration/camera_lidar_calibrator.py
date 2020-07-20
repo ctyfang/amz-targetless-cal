@@ -816,7 +816,6 @@ def loss(tau_scaled, calibrator, hyperparams, cost_history):
     cost_components[2] *= hyperparams['alphas']['points']
     cost_components[3] *= hyperparams['alphas']['corr']
 
-    print(cost_components)
     total_cost = sum(cost_components)
     cost_history.append(total_cost)
     return sum(cost_components)

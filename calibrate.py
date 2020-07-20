@@ -26,4 +26,6 @@ elif cfg.calibration_method == 'automatic':
     hyperparams['alphas']['mi'] = 1.0
     tau_opt, cost_history = calibrator.ls_optimize(hyperparams)
 
-print(tau_opt)
+calibrator.tau = tau_opt
+with open('generated/calibrators/new_calibrator.pkl', 'wb') as output_pkl:
+    pickle.dump(calibrator, output_pkl, pickle.HIGHEST_PROTOCOL)

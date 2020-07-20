@@ -5,7 +5,21 @@ Target-less Calibration between Camera and LiDAR using
 
 1. Manually selected correspondence
 2. Automated correspondence detection combining [Gaussian Mixture Model (GMM)](https://onlinelibrary.wiley.com/doi/abs/10.1002/rob.21893), Chamfer Matching and [Mutual Information](https://www.mendeley.com/catalogue/13a78ff7-a5cb-31e9-81d6-a6893c303e52/)
-   
+
+Implementation assumes a KITTI dataset folder structure like the following:
+
+my_dir  
+--images_00  
+----data  
+------0000000000.jpg  
+--velodyne_points   
+----data  
+------0000000000.bin  
+--calibration  
+----calib_cam_to_cam.txt  
+----calib_velo_to_cam.txt  
+----calib_imu_to_velo.txt   
+
 ## Requirement
 - opencv-contrib-python = 3.4.0.12
 - opencv-python = 3.4.0.12
