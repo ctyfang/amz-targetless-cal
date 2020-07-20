@@ -24,16 +24,11 @@ dataset
 ```
 
 ## Requirement
-- opencv-contrib-python = 3.4.0.12
-- opencv-python = 3.4.0.12
-- pyquaternion = 0.9.5
-- PrettyTable = 0.7.2
-- matplotlib = 3.2.1
-- open3d = 0.9.0
-- numpy = 1.18.3
-- KDEpy = 1.0.5
-- sklearn = 0.0
-- scipy = 1.4.1
+We recommend using pipenv and the Pipfile.lock file to install necessary dependencies in a virtual environment. 
+```
+pipenv install --ignore-pipfile
+pipenv shell
+```
 
 ## Usage
 ```
