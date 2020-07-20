@@ -18,8 +18,9 @@ hyperparams = {'alphas': {'mi': 0, 'gmm': 0, 'points': 0, 'corr': 0,
                                   [0, 0, 0, -2, -2, -2]).tolist()}
 
 if cfg.calibration_method == 'manual':
+    print('Select at least 6 correspondences')
     calibrator.select_correspondences()
-    hyperparams['alphas']['corr'] = 1
+    tau_opt = calibrator.batch_optimization()
 
 elif cfg.calibration_method == 'automatic':
     hyperparams['alphas']['gmm'] = 0.2
