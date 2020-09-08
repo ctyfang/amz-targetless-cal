@@ -33,6 +33,9 @@ class ImgEdgeDetector:
             self.img_h, self.img_w = min(
                 self.img_h, curr_h), min(self.img_w, curr_w)
 
+    def __len__(self):
+        return len(self.imgs)
+
     def img_detect(self, method='canny', visualize=False):
         """
         Detect edges on all the loaded images using Structured Edge Detector
@@ -142,6 +145,11 @@ class ImgEdgeDetector:
         else:
             frame_paths = [os.path.join(path, 'image_00', 'data', str(
                 frame).zfill(10)) + '.png' for frame in frames]
+
+        if len(frame_paths) == 0:
+            frame_paths = sorted(
+                glob(os.path.join(path, 'right_camera_filtered', '*.png'))
+            )
 
         for path in frame_paths:
             imgs.append(cv.imread(path))

@@ -34,6 +34,13 @@ class PcEdgeDetector:
         self.PC_ED_NUM_NN = cfg.pc_ed_num_nn
         self.PC_NUM_CHANNELS = 64
 
+    def __len__(self):
+        if len(self.pcs) == len(self.reflectances):
+            return len(self.pcs)
+        else:
+            print('Number of xyz coordinates does not match number of reflectance frame')
+            return -1
+
     def pc_detect(self, pcs_cam_frame, thresh=60, num_nn=100, rad_nn=0.1,
                   visualize=False):
         """
@@ -136,13 +143,21 @@ class PcEdgeDetector:
             frame_paths = [os.path.join(path, 'velodyne_points', 'data', str(
                 frame).zfill(10)) + ".bin" for frame in frames]
 
+        if len(frame_paths) == 0:
+            frame_paths = sorted(
+                glob(os.path.join(path, 'fw_lidar_filtered', '*.bin'))
+            )
+
         for path in frame_paths:
             _, ext = os.path.splitext(path)
             if ext == '.bin':
                 curr_pc = (np.fromfile(path,
-                                       dtype=np.float32).reshape(-1, 4))[:, :]
+                                       dtype=np.float32).reshape(-1, 6))[:, :]
             elif ext == '.txt':
                 curr_pc = (np.loadtxt(path,
+                                       dtype=np.float32).reshape(-1, 4))[:, :]
+            elif ext == '.npy':
+                curr_pc = (np.fromfile(path,
                                        dtype=np.float32).reshape(-1, 4))[:, :]
             else:
                 print("Invalid point-cloud format encountered.")
@@ -150,8 +165,15 @@ class PcEdgeDetector:
 
             pc = curr_pc[:int(subsample * curr_pc.shape[0]), :3]
             refl = curr_pc[:int(subsample * curr_pc.shape[0]), 3]
-            pcs.append(pc)
-            reflectances.append(refl)
+
+            xyz_mask = ~np.isnan(pc)
+            ref_mask = ~np.isnan(refl)
+            mask = np.logical_and(xyz_mask[:,0], xyz_mask[:,1])
+            mask = np.logical_and(mask, xyz_mask[:, 2])
+            mask = np.logical_and(mask, ref_mask)
+ 
+            pcs.append(pc[mask])
+            reflectances.append(refl[mask])
 
         return pcs, reflectances
 

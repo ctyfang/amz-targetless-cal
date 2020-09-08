@@ -39,11 +39,13 @@ class CameraLidarCalibrator:
             self.R, self.T = load_lid_cal(calib_dir)
         else:
             print("Calibration directory does not exist")
-            exit()
+            print('Assuming images already rectified')
+            self.K = np.eye(3)
+            # exit()
 
         self.correspondences = []
 
-        if tau_init:
+        if tau_init is not None:
             self.tau = tau_init
         elif isinstance(self.R, np.ndarray) and isinstance(self.T, np.ndarray):
             self.tau = self.transform_to_tau(self.R, self.T)
@@ -53,39 +55,42 @@ class CameraLidarCalibrator:
         # Load point clouds/images into the detectors
         self.img_detector = ImgEdgeDetector(cfg, visualize=visualize)
         self.pc_detector = PcEdgeDetector(cfg, visualize=visualize)
-        self.num_frames = len(self.img_detector.imgs)
-        print('Images and pointclouds loaded.')
+        if len(self.img_detector) != len(self.pc_detector):
+            print('Number of images does not match number of point clouds')
+            print(f'{len(self.img_detector)} frames v.s. {len(self.pc_detector)} pcs')
+            exit()
+        self.num_frames = len(self.img_detector)
+        
+        print(f'{self.num_frames} pairs of images and pointclouds loaded.')
 
         # Calculate projected_points, points_cam_frame, projection_mask
         self.project_point_cloud()
 
-        # User input of correspondences
-        # self.select_correspondences()
-
-        # Detect edges
-        print('Executing image edge-detection.')
-        self.img_detector.img_detect(method=cfg.im_ed_method,
-                                     visualize=visualize)
-        gc.collect()
-        print('Image edge-detection completed.')
-        print('Executing point cloud edge-detection.')
-        with warnings.catch_warnings():
-            # ignore runtime warning of ckdtree
-            warnings.simplefilter("ignore")
-            self.pc_detector.pc_detect(self.points_cam_frame,
-                                       cfg.pc_ed_score_thr,
-                                       cfg.pc_ed_num_nn,
-                                       cfg.pc_ed_rad_nn,
-                                       visualize=visualize)
-        gc.collect()
-        print('Point Cloud edge-detection completed.')
+        # Detect edges if automatic method is chosen
+        if cfg.calibration_method == 'automatic':
+            print('Executing image edge-detection.')
+            self.img_detector.img_detect(method=cfg.im_ed_method,
+                                        visualize=visualize)
+            gc.collect()
+            print('Image edge-detection completed.')
+            print('Executing point cloud edge-detection.')
+            with warnings.catch_warnings():
+                # ignore runtime warning of ckdtree
+                warnings.simplefilter("ignore")
+                self.pc_detector.pc_detect(self.points_cam_frame,
+                                        cfg.pc_ed_score_thr,
+                                        cfg.pc_ed_num_nn,
+                                        cfg.pc_ed_rad_nn,
+                                        visualize=visualize)
+            gc.collect()
+            print('Point Cloud edge-detection completed.')
 
         if visualize:
             # self.draw_all_points(score=self.pc_detector.pcs_edge_scores)
-            self.draw_all_points()
-            self.draw_edge_points()
-            self.draw_edge_points(score=self.pc_detector.pcs_edge_scores[-1],
-                                  image=self.img_detector.img_edge_scores[-1])
+            self.draw_reflectance(show=True)
+            # self.draw_edge_points()
+            # self.draw_edge_points(score=self.pc_detector.pcs_edge_scores[-1],
+            #                       image=self.img_detector.img_edge_scores[-1])
 
         # Optimization parameters
         self.num_iterations = 0
@@ -273,6 +278,7 @@ class CameraLidarCalibrator:
             inside_mask_x = np.logical_and(
                 (projected_points.T[:, 0] >= 0),
                 (projected_points.T[:, 0] <= self.img_detector.img_w))
+
             inside_mask_y = np.logical_and(
                 (projected_points.T[:, 1] >= 0),
                 (projected_points.T[:, 1] <= self.img_detector.img_h))
