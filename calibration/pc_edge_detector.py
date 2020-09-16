@@ -152,13 +152,13 @@ class PcEdgeDetector:
             _, ext = os.path.splitext(path)
             if ext == '.bin':
                 curr_pc = (np.fromfile(path,
-                                       dtype=np.float32).reshape(-1, 6))[:, :]
+                                       dtype=np.float64).reshape(-1, 6))[:, :]
             elif ext == '.txt':
                 curr_pc = (np.loadtxt(path,
-                                       dtype=np.float32).reshape(-1, 4))[:, :]
+                                       dtype=np.float64).reshape(-1, 6))[:, :]
             elif ext == '.npy':
                 curr_pc = (np.fromfile(path,
-                                       dtype=np.float32).reshape(-1, 4))[:, :]
+                                       dtype=np.float64).reshape(-1, 6))[:, :]
             else:
                 print("Invalid point-cloud format encountered.")
                 exit()
@@ -379,4 +379,11 @@ class PcEdgeDetector:
         vis = o3d.visualization.Visualizer()
         vis.create_window()
         vis.add_geometry(pcd)
+        ctr = vis.get_view_control()
+        print("Field of view (before changing) %.2f" % ctr.get_field_of_view())
+        ctr.change_field_of_view(step=4)
+        print("Field of view (after changing) %.2f" % ctr.get_field_of_view())
         vis.run()
+        cam = ctr.convert_to_pinhole_camera_parameters()
+        print(cam.extrinsic)
+        print(cam.intrinsic.intrinsic_matrix)

@@ -136,7 +136,7 @@ class ImgEdgeDetector:
         :param frames: iterable, or -1
         :return:
         """
-        """"""
+
         imgs = []
 
         if frames == -1:
@@ -148,7 +148,7 @@ class ImgEdgeDetector:
 
         if len(frame_paths) == 0:
             frame_paths = sorted(
-                glob(os.path.join(path, 'right_camera_filtered', '*.png'))
+                glob(os.path.join(path, 'forward_camera_filtered', '*.png'))
             )
 
         for path in frame_paths:

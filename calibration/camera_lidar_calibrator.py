@@ -87,8 +87,8 @@ class CameraLidarCalibrator:
 
         if visualize:
             # self.draw_all_points(score=self.pc_detector.pcs_edge_scores)
-            self.draw_reflectance(show=True)
-            # self.draw_edge_points()
+            # self.draw_reflectance(show=True)
+            self.draw_edge_points()
             # self.draw_edge_points(score=self.pc_detector.pcs_edge_scores[-1],
             #                       image=self.img_detector.img_edge_scores[-1])
 
