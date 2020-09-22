@@ -161,7 +161,7 @@ def depth_color(points, min_d=0, max_d=120):
     # max distance is 120m but usually not usual
     return (((dist - min_d) / (max_d - min_d)) * 120).astype(np.uint8)
 
-def draw_points(points, image, R, t):
+def draw_points(points, image, R, t, rect=np.eye(3)):
     '''
     Draw points within corresponding camera's FoV on image provided.
     If no image provided, points are drawn on an empty(black) background.
@@ -169,7 +169,7 @@ def draw_points(points, image, R, t):
     hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
     color = depth_color(points)
-    pixels = to_pixel(points, R, t)
+    pixels = to_pixel(points, R, t, rect=rect)
     for i in range(pixels.shape[1]):
         if points[i, 0] < 0:
             continue
@@ -205,7 +205,7 @@ if __name__ == '__main__':
     R, _ = cv2.Rodrigues(R)
     print(R)
     print(t)
-    cv2.imshow('projection', draw_points(pc[:,:3], img, R, t))
+    cv2.imshow('projection', draw_points(pc[:,:3], img, R, t, K_mtx))
     cv2.waitKey(0)
     # camera = create_pinhole_camera(
     #     '/Users/jpzhong/Documents/git/sensor_fusion_2020/preprocessing/preprocessing/resources/forward.yaml'
