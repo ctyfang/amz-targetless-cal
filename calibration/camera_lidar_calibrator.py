@@ -1,5 +1,6 @@
 from datetime import datetime
 import gc
+import yaml
 import warnings
 
 from KDEpy import FFTKDE
@@ -33,15 +34,21 @@ class CameraLidarCalibrator:
         self.points_cam_frame = []
         self.projection_mask = []
 
-        calib_dir = os.path.join(cfg.dir, 'calibration')
-        if os.path.exists(calib_dir):
+        # calib_dir = os.path.join(cfg.dir, 'calibration')
+        if os.path.exists(os.path.join(cfg.dir, 'calibration')):
             self.K = load_cam_cal(calib_dir)
             self.R, self.T = load_lid_cal(calib_dir)
+        elif os.path.exists(os.path.join(cfg.calib_dir)):
+            with open(cfg.calib_dir) as f:
+                try:
+                    data = yaml.load(f, Loader=yaml.CLoader)
+                except AttributeError:
+                    data = yaml.load(f, Loader=yaml.Loader)
+            self.K = np.array(data['camera_matrix']['data']).reshape(
+        (data['camera_matrix']['rows'], data['camera_matrix']['cols']))
         else:
-            print("Calibration directory does not exist")
-            print('Assuming images already rectified')
-            self.K = np.eye(3)
-            # exit()
+            print("Please specify root to calibration file")
+            exit()
 
         self.correspondences = []
 
@@ -182,6 +189,7 @@ class CameraLidarCalibrator:
                             break
                     else:
                         print("Uneven number of points. Select one more.")
+            cv.destroyAllWindows()
 
             gray_pixels = np.asarray(gray_pixels)
             lidar_pixels = np.asarray(lidar_pixels)
@@ -443,50 +451,52 @@ class CameraLidarCalibrator:
 
         return (colors[:, :3] * 255).astype(np.uint8)
 
-    def draw_points(self, image=None, FULL=True):
-        """
-        Draw points within corresponding camera's FoV on image provided.
-        If no image provided, points are drawn on an empty(black) background.
-        """
+    # def draw_points(self, image=None, FULL=True, frame=-1):
+    #     """
+    #     Draw points within corresponding camera's FoV on image provided.
+    #     If no image provided, points are drawn on an empty(black) background.
+    #     """
 
-        if image is not None:
-            image = np.uint8(np.dstack((image, image, image))) * 255
-            cv.imshow('Before projection', image)
-            cv.waitKey(0)
+    #     if image is not None:
+    #         if image.shape[-1] == 1:
+    #             image = np.uint8(np.dstack((image, image, image))) * 255
+    #         cv.imshow('Before projection', image)
+    #         cv.waitKey(0)
 
-            hsv_image = cv.cvtColor(image, cv.COLOR_BGR2HSV)
-        else:
-            hsv_image = np.zeros(self.img_detector.imgs.shape).astype(np.uint8)
+    #         hsv_image = cv.cvtColor(image, cv.COLOR_BGR2HSV)
+    #     else:
+    #         hsv_image = np.zeros(self.img_detector.imgs.shape).astype(np.uint8)
 
-        color = self.pc_to_colors()
-        if FULL:
-            index = range(self.projected_points.shape[0])
-        else:
-            index = np.random.choice(self.projected_points.shape[0],
-                                     size=int(self.projected_points.shape[0] /
-                                              10),
-                                     replace=False)
-        for i in index:
-            if pc[i, 0] < 0:
-                continue
-            if self.projection_mask[i] is False:
-                continue
+    #     color = self.pc_to_colors(frame=-1)
+    #     if FULL:
+    #         index = range(self.projected_points[frame].shape[0])
+    #     else:
+    #         index = np.random.choice(self.projected_points[frame].shape[0],
+    #                                  size=int(self.projected_points[frame].shape[0] /
+    #                                           10),
+    #                                  replace=False)
+        
+    #     for i in index:
+    #         if pc[i, 1] > 0:
+    #             continue
+    #         if self.projection_mask[i] is False:
+    #             continue
 
-            cv.circle(hsv_image, (np.int32(self.projected_points[i, 0]),
-                                  np.int32(self.projected_points[i, 1])), 1,
-                      (int(color[i]), 255, 255), -1)
+    #         cv.circle(hsv_image, (np.int32(self.projected_points[i, 0]),
+    #                               np.int32(self.projected_points[i, 1])), 1,
+    #                   (int(color[i]), 255, 255), -1)
 
-        return cv.cvtColor(hsv_image, cv.COLOR_HSV2BGR)
+    #     return cv.cvtColor(hsv_image, cv.COLOR_HSV2BGR)
 
-    def pc_to_colors(self, min_d=0, max_d=120):
+    def pc_to_colors(self, min_d=0, max_d=120, frame=-1):
         """
         print Color(HSV's H value) corresponding to distance(m)
         close distance = red , far distance = blue
         """
         dist = np.sqrt(
-            np.add(np.power(self.pc_detector.pcs[:, 0], 2),
-                   np.power(self.pc_detector.pcs[:, 1], 2),
-                   np.power(self.pc_detector.pcs[:, 2], 2)))
+            np.add(np.power(self.pc_detector.pcs[frame][:, 0], 2),
+                   np.power(self.pc_detector.pcs[frame][:, 1], 2),
+                   np.power(self.pc_detector.pcs[frame][:, 2], 2)))
         np.clip(dist, 0, max_d, out=dist)
         # max distance is 120m but usually not the case
         return (((dist - min_d) / (max_d - min_d)) * 120).astype(np.uint8)
@@ -659,6 +669,7 @@ class CameraLidarCalibrator:
         for matches in self.correspondences:
             gray_pixels = matches[0]
             lidar_points = matches[1]
+            print(lidar_points)
             lidar_points_cam = np.matmul(self.R, lidar_points.T) + self.T
             lidar_pixels_homo = (np.matmul(self.K, lidar_points_cam).T)
             lidar_pixels_homo = lidar_pixels_homo / \

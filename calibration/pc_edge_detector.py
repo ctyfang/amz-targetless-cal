@@ -146,7 +146,7 @@ class PcEdgeDetector:
         if len(frame_paths) == 0:
             frame_paths = sorted(
                 glob(os.path.join(path, 'fw_lidar_filtered', '*.bin'))
-            )
+            )[0:6]
 
         for path in frame_paths:
             _, ext = os.path.splitext(path)

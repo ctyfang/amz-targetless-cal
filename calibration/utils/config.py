@@ -18,6 +18,10 @@ def command_line_parser():
         help='Path to directory containing point clouds, images and calibration')
 
     parser.add_argument(
+        '--calib_dir', type=str, default='', required=True,
+        help='Path to calibration yaml file')
+
+    parser.add_argument(
         '--frames', type=json.loads, default='-1',
         help='Initial guess of the transformation')
 

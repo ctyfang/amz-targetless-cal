@@ -149,7 +149,7 @@ class ImgEdgeDetector:
         if len(frame_paths) == 0:
             frame_paths = sorted(
                 glob(os.path.join(path, 'forward_camera_filtered', '*.png'))
-            )
+            )[0:6]
 
         for path in frame_paths:
             imgs.append(cv.imread(path))

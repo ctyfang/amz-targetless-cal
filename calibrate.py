@@ -3,28 +3,27 @@ from calibration.utils.config import command_line_parser
 from calibration.utils.data_utils import *
 from calibration.utils.img_utils import *
 import pickle
+import cv2
 
 def main():
+    pwd = os.path.abspath(".")
     cfg = command_line_parser()
 
     # Create calibrator and detect edges from scratch
-    # R = np.array([0.39617389417871668, 0.91206160557644977, -0.10578219701149925]).reshape((1,3))
-    # print(R.shape)
-    # with open('extrinsics.npy', 'rb') as f:
-    #     extrinsics = np.load(f)
+    init_guess_file = 'extrinsics_fw_forward.npz'
+    with np.load(init_guess_file) as data:
+        R = data['R']
+        t = data['t']
+    print(R.shape)
+    print(t.shape)
 
-    # R = extrinsics[:3, :3].reshape((3,3))
-    # T = extrinsics[:3, 3].reshape((3,1))
-    # # T = np.array([-1.657708471611965, 0.739773004848766, 1.953301910912623]).reshape(3,1)
-    # # T = np.zeros((3,1))
-    # tau_init = CameraLidarCalibrator.transform_to_tau(R, T)
-    tau_init = ([-1.15635992, 1.20566204, 1.08336936, -6.89556144, 1.61074365, 6.17246534])
+    tau_init = np.hstack((R, t)).squeeze()
     print(tau_init)
 
     calibrator = CameraLidarCalibrator(cfg, visualize=False, tau_init=tau_init)
 
-    with open('generated/calibrators/new_calibrator.pkl', 'wb') as output_pkl:
-        pickle.dump(calibrator, output_pkl, pickle.HIGHEST_PROTOCOL)
+    # with open('generated/calibrators/new_calibrator.pkl', 'wb') as output_pkl:
+    #     pickle.dump(calibrator, output_pkl, pickle.HIGHEST_PROTOCOL)
 
     # exit()
     if cfg.calibration_method == 'manual':
@@ -33,9 +32,17 @@ def main():
         tau_opt = calibrator.batch_optimization()
 
     calibrator.tau = tau_opt
+    with open(os.path.join(pwd, init_guess_file), 'wb') as f:
+        np.savez(f, R=tau_opt[:3], t=tau_opt[3:])
     with open('generated/calibrators/new_calibrator.pkl', 'wb') as output_pkl:
         pickle.dump(calibrator, output_pkl, pickle.HIGHEST_PROTOCOL)
+    # with open('generated/calibrators/new_calibrator.pkl', 'rb') as input_pkl:
+    #     calibrator = pickle.load(input_pkl)
+    #     calibrator.visualize = True
 
+    for idx in range(len(calibrator.img_detector.imgs)):
+        calibrator.draw_all_points(frame=idx, show=True)
+    # cv2.imshow('projection', projection)
 
 if __name__ == "__main__":
     main()

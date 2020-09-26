@@ -68,16 +68,26 @@ def get_extrinsics(pcd, camera):
 def commandline_parser():
     parser = argparse.ArgumentParser(
         add_help=True, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument('--dir_pc',
+    parser.add_argument('--dir_data',
                         type=str,
                         default='',
                         required=True,
-                        help='Path to directory containing point clouds')
-    parser.add_argument('--dir_img',
+                        help='Path to top level directory containing data')
+    parser.add_argument('--dir_calib',
                         type=str,
                         default='',
                         required=True,
-                        help='Path to directory containing point clouds')
+                        help='Path to directory containing camera infos')
+    parser.add_argument('--lidar',
+                        type=str,
+                        default='',
+                        required=True,
+                        help='LiDAR to Calibrate, e.g. fw or mrh')
+    parser.add_argument('--camera',
+                        type=str,
+                        default='',
+                        required=True,
+                        help='Camera to Calibrate, e.g. left right forward')
     cfg = parser.parse_args()
 
     return cfg
@@ -148,7 +158,7 @@ def to_pixel(pcd, R, T, rect=np.eye(3)):
     pixels = np.delete(pixels, 2, axis=0)
     return pixels
 
-def depth_color(points, min_d=0, max_d=120):
+def depth_color(points, min_d=0, max_d=30):
     """
     print Color(HSV's H value) corresponding to distance(m)
     close distance = red , far distance = blue
@@ -171,7 +181,7 @@ def draw_points(points, image, R, t, rect=np.eye(3)):
     color = depth_color(points)
     pixels = to_pixel(points, R, t, rect=rect)
     for i in range(pixels.shape[1]):
-        if points[i, 0] < 0:
+        if points[i, 1] > 0:
             continue
         if ((pixels[0, i] < 0) | (pixels[1, i] < 0) |
             (pixels[0, i] > hsv_image.shape[1]) |
@@ -180,33 +190,56 @@ def draw_points(points, image, R, t, rect=np.eye(3)):
         cv2.circle(
             hsv_image,
             (np.int32(pixels[0, i]), np.int32(pixels[1, i])),
-            1, (int(color[i]), 255, 255), -1)
+            2, (int(color[i]), 255, 255), -1)
     return cv2.cvtColor(hsv_image, cv2.COLOR_HSV2BGR)
 
 
 if __name__ == '__main__':
     pwd = os.path.abspath(".")
     cfg = commandline_parser()
-    pcfiles = sorted(glob(os.path.join(cfg.dir_pc, '*.bin')))
-    imgfile = sorted(glob(os.path.join(cfg.dir_img, '*.png')))
+    pcfiles = sorted(glob(os.path.join(
+                          cfg.dir_data,
+                          cfg.lidar+'_lidar_filtered',
+                          '*.bin')))
+    imgfile = sorted(glob(os.path.join(cfg.dir_data, cfg.camera+'_camera_filtered', '*.png')))
 
     img = cv2.imread(imgfile[0])
-    img_points = select_img_points(img)
+    # img_points = select_img_points(img)
 
     pc = (np.fromfile(pcfiles[0], dtype=np.float64).reshape(-1, 6))[:, :4]
     pcd = create_pcd(pc[:, :3], pc[:, 3])
-    pc_index = pick_points(pcd)
+    # pc_index = pick_points(pcd)
 
     K_mtx, distort = create_pinhole_camera(
-        '/Users/jpzhong/Documents/git/sensor_fusion_2020/preprocessing/preprocessing/resources/forward.yaml'
+        os.path.join(cfg.dir_calib, cfg.camera+'.yaml')
     )
+    # K_mtx, distort = create_pinhole_camera(
+    #     '/Users/jpzhong/Documents/git/sensor_fusion_2020/preprocessing/preprocessing/resources/left.yaml'
+    # )
+    # K_mtx, distort = create_pinhole_camera(
+    #     '/Users/jpzhong/Documents/git/sensor_fusion_2020/preprocessing/preprocessing/resources/right.yaml'
+    # )
 
-    _, R, t = cv2.solvePnP(pc[pc_index, :3], img_points, K_mtx, distort)
+    # _, R, t = cv2.solvePnP(pc[pc_index, :3], img_points, K_mtx, distort)
+    # with open(os.path.join(pwd, 'extrinsics_fw_left.npz'), 'wb') as f:
+    #     np.savez(f, R=R, t=t)
+    # with np.load('extrinsics.npz') as data:
+    # with np.load('projection/extrinsics_fw_forward.npz') as data:
+    #     R = data['R']
+    #     t = data['t']
+    # R = np.array(0.57379362 0.03619022 0.84195514)
+    # print(R)
+    # print(t)
+    R = np.array([ 0.57379362, 0.03619022, 0.84195514]).reshape(3,1)
+    t = np.array([-0.0507016, -2.16135189, 2.25084716]).reshape(3,1)
     R, _ = cv2.Rodrigues(R)
-    print(R)
-    print(t)
-    cv2.imshow('projection', draw_points(pc[:,:3], img, R, t, K_mtx))
+    # print(R)
+    # print(t)
+    projection = draw_points(pc[:,:3], img, R, t, K_mtx)
+    cv2.imshow('projection', projection)
     cv2.waitKey(0)
+    cv2.imwrite(os.path.join(pwd, 'projection_fw_left.png'), projection)
+
     # camera = create_pinhole_camera(
     #     '/Users/jpzhong/Documents/git/sensor_fusion_2020/preprocessing/preprocessing/resources/forward.yaml'
     # )
