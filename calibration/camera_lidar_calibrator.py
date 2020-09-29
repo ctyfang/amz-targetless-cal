@@ -46,6 +46,7 @@ class CameraLidarCalibrator:
                     data = yaml.load(f, Loader=yaml.Loader)
             self.K = np.array(data['camera_matrix']['data']).reshape(
         (data['camera_matrix']['rows'], data['camera_matrix']['cols']))
+            self.distortion = np.array(data['distortion_coefficients']['data']).reshape((data['distortion_coefficients']['rows'], data['distortion_coefficients']['cols']))
         else:
             print("Please specify root to calibration file")
             exit()
@@ -134,6 +135,9 @@ class CameraLidarCalibrator:
                     ref_pt[0], ref_pt[1] = nearest_pixel[0], nearest_pixel[1]
                     ref_pt_3D[:] = curr_pc[i, :]
 
+        gray_pixels = []
+        lidar_pixels = []
+        lidar_points = []
         for frame_idx in range(self.num_frames):
             curr_pc = self.pc_detector.pcs[frame_idx]
             curr_pc_pixels = self.projected_points[frame_idx]
@@ -149,9 +153,6 @@ class CameraLidarCalibrator:
             cv.namedWindow("Correspondences")
             cv.setMouseCallback("Correspondences", correspondence_cb)
 
-            gray_pixels = []
-            lidar_pixels = []
-            lidar_points = []
             while True:
                 if points_selected % 2 == 0:
                     curr_img = img_gray
@@ -191,19 +192,19 @@ class CameraLidarCalibrator:
                         print("Uneven number of points. Select one more.")
             cv.destroyAllWindows()
 
-            gray_pixels = np.asarray(gray_pixels)
-            lidar_pixels = np.asarray(lidar_pixels)
-            lidar_points = np.asarray(lidar_points)
+        gray_pixels = np.asarray(gray_pixels)
+        lidar_pixels = np.asarray(lidar_pixels)
+        lidar_points = np.asarray(lidar_points)
 
-            if self.visualize:
-                cv.imshow(
-                    "Matches",
-                    draw_point_matches(img_gray, gray_pixels, img_synthetic,
-                                       lidar_pixels))
-                cv.waitKey(0)
-                cv.destroyAllWindows()
+        if self.visualize:
+            cv.imshow(
+                "Matches",
+                draw_point_matches(img_gray, gray_pixels, img_synthetic,
+                                    lidar_pixels))
+            cv.waitKey(0)
+            cv.destroyAllWindows()
 
-            self.correspondences.append((gray_pixels, lidar_points))
+        self.correspondences.append((gray_pixels, lidar_points))
 
     def update_extrinsics(self, tau_new):
         """Given new extrinsic parameters, update the rotation matrix,
@@ -451,56 +452,6 @@ class CameraLidarCalibrator:
 
         return (colors[:, :3] * 255).astype(np.uint8)
 
-    # def draw_points(self, image=None, FULL=True, frame=-1):
-    #     """
-    #     Draw points within corresponding camera's FoV on image provided.
-    #     If no image provided, points are drawn on an empty(black) background.
-    #     """
-
-    #     if image is not None:
-    #         if image.shape[-1] == 1:
-    #             image = np.uint8(np.dstack((image, image, image))) * 255
-    #         cv.imshow('Before projection', image)
-    #         cv.waitKey(0)
-
-    #         hsv_image = cv.cvtColor(image, cv.COLOR_BGR2HSV)
-    #     else:
-    #         hsv_image = np.zeros(self.img_detector.imgs.shape).astype(np.uint8)
-
-    #     color = self.pc_to_colors(frame=-1)
-    #     if FULL:
-    #         index = range(self.projected_points[frame].shape[0])
-    #     else:
-    #         index = np.random.choice(self.projected_points[frame].shape[0],
-    #                                  size=int(self.projected_points[frame].shape[0] /
-    #                                           10),
-    #                                  replace=False)
-        
-    #     for i in index:
-    #         if pc[i, 1] > 0:
-    #             continue
-    #         if self.projection_mask[i] is False:
-    #             continue
-
-    #         cv.circle(hsv_image, (np.int32(self.projected_points[i, 0]),
-    #                               np.int32(self.projected_points[i, 1])), 1,
-    #                   (int(color[i]), 255, 255), -1)
-
-    #     return cv.cvtColor(hsv_image, cv.COLOR_HSV2BGR)
-
-    def pc_to_colors(self, min_d=0, max_d=120, frame=-1):
-        """
-        print Color(HSV's H value) corresponding to distance(m)
-        close distance = red , far distance = blue
-        """
-        dist = np.sqrt(
-            np.add(np.power(self.pc_detector.pcs[frame][:, 0], 2),
-                   np.power(self.pc_detector.pcs[frame][:, 1], 2),
-                   np.power(self.pc_detector.pcs[frame][:, 2], 2)))
-        np.clip(dist, 0, max_d, out=dist)
-        # max distance is 120m but usually not the case
-        return (((dist - min_d) / (max_d - min_d)) * 120).astype(np.uint8)
-
     def compute_mi_cost(self, frame=-1):
         """For selected image-scan pair, compute mutual information cost.
 
@@ -669,7 +620,6 @@ class CameraLidarCalibrator:
         for matches in self.correspondences:
             gray_pixels = matches[0]
             lidar_points = matches[1]
-            print(lidar_points)
             lidar_points_cam = np.matmul(self.R, lidar_points.T) + self.T
             lidar_pixels_homo = (np.matmul(self.K, lidar_points_cam).T)
             lidar_pixels_homo = lidar_pixels_homo / \
@@ -727,8 +677,8 @@ class CameraLidarCalibrator:
             cv.imwrite('generated/optimized.jpg', img)
 
         print('\n### Optimization completed ###')
-        print('xyz (m): ' + str(np.squeeze(self.tau)[:3]))
-        print('Rotation Vector: ' + str(np.squeeze(self.tau)[3:]))
+        print('xyz (m): ' + str(np.squeeze(self.tau)[3:]))
+        print('Rotation Vector: ' + str(np.squeeze(self.tau)[:3]))
         return opt_results.x
 
     def ls_optimize(self, hyperparams, maxiter=600):
